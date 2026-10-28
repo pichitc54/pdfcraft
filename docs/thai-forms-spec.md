@@ -2,11 +2,11 @@
 
 What this personal fork adds to PdfCraft so Thai can be filled into forms, typed into comments and edited in existing PDFs on macOS, written so it can be rebuilt on any upstream release (ADR 0003). Terms in **bold** are defined in `GLOSSARY.md`.
 
-Status: written 2026-10-28 for the rebuild on v0.14.0, from the v0.9.0 fork (tag `thai-forms-v0.9`).
+Status: written 2026-10-28 for the rebuild on v0.14.0, from the v0.9.0 fork (tag `thai-forms-v0.9`). Areas A and B rebuilt on v0.14.0 (branch `thai`); C and D not yet.
 
 ## Principles
 
-1. **Behaviour, not code.** Each rule below is met however the current upstream is laid out. "Last seen in" hints point at the v0.9.0 fork only to help find the seam.
+1. **Behaviour, not code.** Each rule below is met however the current upstream is laid out. "Last seen in" hints point at the most recent build of each area only to help find the seam.
 2. **Upstream first.** If upstream already meets a criterion (Thai shaping, Thai line breaking, its craft-fonts Thai face, its interface Thai font, reading `/ActualText`), use it and write no fork code for it. Check before building each rule: `git grep -i thai <tag> -- crates`.
 3. **Deliberate departures stay.** These are hard requirements even if upstream does otherwise:
    - ADR 0001: Thai field values are drawn in Sarabun, found at runtime first and embedded whole as a real TrueType font, so other viewers can redraw the field.
@@ -18,7 +18,7 @@ Status: written 2026-10-28 for the rebuild on v0.14.0, from the v0.9.0 fork (tag
 
 1. `git fetch origin --tags`, then cut `thai` (or `thai-<version>`) from the release **tag**, not `origin/main`.
 2. First commit: copy `GLOSSARY.md`, `docs/adr/0001…0003` and this spec from the previous branch.
-3. craft-fonts: merge `origin/main` into the local `thai` branch. It adds Sarabun (Regular, Bold, Italic, Bold Italic, OFL) and lists Sarabun **before** Noto Sans Thai in the manifest, so Sarabun is the built-in fallback and the face upstream takes first. Build with `CRAFT_FONTS_DIR=../craft-fonts`.
+3. craft-fonts: merge `origin/main` into the local `thai` branch. It adds Sarabun (Regular, Bold, Italic, Bold Italic, OFL) and lists Sarabun **before** Noto Sans Thai in the manifest, so Sarabun is the built-in fallback and the face upstream takes first. Build with `CRAFT_FONTS_DIR` set to its **absolute** path (build.rs runs in the crate's folder, so a relative path silently builds without craft-fonts).
 4. For each area: read upstream's code for that feature, list what it already does against the acceptance examples, and build only the rest. Commit as `Thai forms N: <behaviour>`.
 5. Before the first build, record upstream's own test failures on the plain tag (`cargo test -p <crate>`); only failures that don't happen there count against the rebuild.
 6. Verify (see Verification), then release (see Release).
@@ -60,7 +60,8 @@ Status: written 2026-10-28 for the rebuild on v0.14.0, from the v0.9.0 fork (tag
 - With no Thai face available, saving keeps `/V` and shows the warning.
 - "น้ำ" extracts as "น้ำ", not "น ้ำ" or with the marks reordered.
 
-Last seen in: `fonts/src/thai.rs` (lookup, shape, embed, x_height, mark_top), `forms/src/appearance.rs` (pen, line pitch, auto size), `forms/src/lib.rs` (field_len, clip_to_max_len), `engine` (install_thai_faces), `render/src/text.rs` (mark order).
+Last seen in (v0.14.0): `fonts/src/thai.rs` (lookup, shape, embed, `embedded_face`, x_height, mark_top, wrap). `forms/src/appearance.rs`: `FontText::Thai` (upstream's field-font enum gained a variant, so `/DR` lookup, widths, wrapping and overflow all see Sarabun) and `field_appearance_written`, the one step that embeds and rewrites `/DA` before upstream's read-only drawing; `redraw` (lib.rs) and `redraw_widgets` (author.rs) call it. `forms/src/lib.rs` (field_len, clip_to_max_len). `engine` (install_thai_faces), `render/src/text.rs` (mark order). Tests: `forms/src/thai_tests.rs`, and the ones that render in `engine/tests/it/thai_forms.rs` (forms may not depend on render: `cargo xtask layers`).
+Upstream at v0.14.0 has its own Thai shaping (`fonts/src/shaping.rs`), but only with the built-in craft-fonts face, so it can't serve a runtime-found Sarabun.
 
 ## B. Interface and fill editor
 
@@ -75,7 +76,7 @@ Last seen in: `fonts/src/thai.rs` (lookup, shape, embed, x_height, mark_top), `f
 - Thai shows in menus, dialogs and the fill editor (no tofu).
 - While typing three lines of Thai into a multiline field next to Latin fields, each line stays level with its neighbours, before and after the field is committed.
 
-Last seen in: `ui-egui/src/forms_ui.rs` (LINE_PITCH, pitched layouter).
+Last seen in (v0.14.0): `ui-egui/src/forms_ui.rs` (LINE_PITCH, pitched_job, MaxLen clip after each edit).
 
 ## C. Comments: text boxes, callouts, Fill & Sign text
 
@@ -91,7 +92,7 @@ Last seen in: `ui-egui/src/forms_ui.rs` (LINE_PITCH, pitched layouter).
 - A text box, a callout and a Fill & Sign text holding "สวัสดีครับ" render correctly, flatten without a refusal, and read back as typed.
 - A text box holding Chinese behaves exactly as on plain upstream.
 
-Last seen in: `annot/src/appearance.rs`, `annot/src/lib.rs`.
+Last seen in (v0.9.0): `annot/src/appearance.rs`, `annot/src/lib.rs`.
 
 ## D. Editing existing Thai text
 
@@ -119,7 +120,7 @@ Last seen in: `annot/src/appearance.rs`, `annot/src/lib.rs`.
 - Chrome-made "น้ำ" and "เป็น" (ActualText) edit and read back as typed.
 - No macOS "access data from other apps" prompt at start-up.
 
-Last seen in: `fonts/src/installed.rs`, `fonts/src/thai.rs` (repair_sara_am), `edit/src/text_regions.rs` (MIN_FIT, wrap), `edit/src/text.rs`, `engine` (edit_font_notices).
+Last seen in (v0.9.0): `fonts/src/installed.rs`, `fonts/src/thai.rs` (repair_sara_am), `edit/src/text_regions.rs` (MIN_FIT, wrap), `edit/src/text.rs`, `engine` (edit_font_notices).
 
 ## Out of scope
 

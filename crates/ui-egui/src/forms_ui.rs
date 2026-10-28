@@ -506,6 +506,23 @@ pub(crate) fn paint_page(
     }
 }
 
+/// The line pitch of a multiline field, in em: the page appearance's, for every font.
+const LINE_PITCH: f32 = 1.15;
+
+/// `text` laid out as a multiline field draws it: at `size`, wrapped at `wrap`, one line every
+/// [`LINE_PITCH`] whatever the fonts (Thai lines would otherwise take the Thai font's taller height).
+pub fn pitched_job(text: &str, size: f32, wrap: f32) -> egui::text::LayoutJob {
+    let format = egui::TextFormat {
+        font_id: egui::FontId::proportional(size),
+        color: Color32::BLACK,
+        line_height: Some(size * LINE_PITCH),
+        ..Default::default()
+    };
+    let mut job = egui::text::LayoutJob::single_section(text.to_owned(), format);
+    job.wrap.max_width = wrap;
+    job
+}
+
 /// The size, in points, a text field shows `text` at on screen: its `/DA` size, or for auto size
 /// (`0 Tf`) the page appearance's fit, measured in the font the screen draws with so the text
 /// stays inside the box (the interface font runs wider than the page's Helvetica).
@@ -529,7 +546,7 @@ pub fn field_text_size(painter: &egui::Painter, f: &FormField, w: &FormWidget, t
         let line_width = |size: f64| f64::from(painter.layout_no_wrap(fit.to_string(), font(size), Color32::BLACK).size().x);
         // Wrapped as the editor and the page preview wrap it.
         let wrap = width.max(1.0) as f32;
-        let wrapped_height = |size: f64| f64::from(painter.layout(fit.to_string(), font(size), Color32::BLACK, wrap).size().y);
+        let wrapped_height = |size: f64| f64::from(painter.layout_job(pitched_job(fit, size as f32, wrap)).size().y);
         pdfcraft_engine::field_auto_text_size_by(width, height, f.has(field_flags::MULTILINE), line_width, wrapped_height)
     });
     size.min(300.0) as f32
@@ -698,11 +715,16 @@ pub(crate) fn overlay(
                         .margin(egui::Margin::symmetric(3, 1))
                         .password(f.has(field_flags::PASSWORD))
                         .id(egui::Id::new(("form-field", view.id.0, &f.name, focus.widget)));
-                    if let Some(max) = f.max_len {
-                        te = te.char_limit(max);
-                    }
+                    // Multiline text keeps the page's line pitch, so its rows stay level with the
+                    // fields beside it while it is typed.
+                    let mut pitched = |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap: f32| {
+                        ui.fonts_mut(|f| f.layout_job(pitched_job(text.as_str(), font, wrap)))
+                    };
                     if multiline {
-                        te = te.desired_rows(((rect.height() / (font * 1.3)).floor() as usize).max(1));
+                        te = te.desired_rows(((rect.height() / (font * LINE_PITCH)).floor() as usize).max(1));
+                        if !f.has(field_flags::PASSWORD) {
+                            te = te.layouter(&mut pitched);
+                        }
                     }
                     let mut laid_out = None;
                     let r = ui.add_sized(rect.size(), |ui: &mut egui::Ui| {
@@ -722,6 +744,12 @@ pub(crate) fn overlay(
                             }
                             ui.ctx().request_repaint();
                         }
+                    }
+                    // MaxLen counts grapheme clusters (pdfcraft_engine::field_len; ที่ is one), which
+                    // egui's char_limit can't: the text is clipped after each edit instead.
+                    if let Some(max) = f.max_len {
+                        let clipped = pdfcraft_engine::clip_to_max_len(&fx.text, max).len();
+                        fx.text.truncate(clipped);
                     }
                     if let Some(press) = fx.press.take()
                         && let Some((galley, pos)) = laid_out
