@@ -968,6 +968,13 @@ fn is_complex(c: char) -> bool {
     matches!(c as u32, 0x0300..=0x036F | 0x0900..=0x0DFF | 0x0E00..=0x0EFF | 0x1000..=0x109F | 0x1780..=0x17FF)
 }
 
+/// Combining marks drawn over or under the character before them (general diacritics, Thai,
+/// Lao). Shaping places stacked marks at nearly the same x, so their own position says nothing
+/// about reading order.
+fn is_combining_mark(c: char) -> bool {
+    matches!(c as u32, 0x0300..=0x036F | 0x0E31 | 0x0E34..=0x0E3A | 0x0E47..=0x0E4E | 0x0EB1 | 0x0EB4..=0x0EBC | 0x0EC8..=0x0ECE)
+}
+
 fn is_cjk(c: char) -> bool {
     matches!(c as u32, 0x2E80..=0x9FFF | 0xAC00..=0xD7AF | 0xF900..=0xFAFF | 0xFF00..=0xFFEF | 0x20000..=0x3134F | 0x1100..=0x11FF)
 }
@@ -1183,9 +1190,23 @@ fn place_glyphs(glyphs: &[&TextGlyph], height: &dyn Fn(usize) -> f32, s: &Seg, s
         }
     }
     if sc.text.len() <= 1 {
-        // A single run cannot collide with itself: its glyphs only need sorting by x.
-        sc.placed.extend(sc.text.iter().flat_map(|run| run.range()));
-        sc.placed.sort_unstable_by(|a, b| x0(*a).total_cmp(&x0(*b)).then(a.cmp(b)));
+        // A single run cannot collide with itself: its glyphs only need sorting by x. A combining
+        // mark sorts at the x of the glyph it follows in content order, so stacked Thai marks keep
+        // their order after their letter instead of being ordered by their own few-unit offsets.
+        let mark = |i: usize| {
+            let mut chars = glyphs.get(i).map(|g| g.text.chars()).into_iter().flatten();
+            chars.next().is_some_and(is_combining_mark) && chars.next().is_none()
+        };
+        let mut base_x = None;
+        let mut keyed: Vec<(usize, f32)> = Vec::new();
+        for i in sc.text.iter().flat_map(|run| run.range()) {
+            if !mark(i) || base_x.is_none() {
+                base_x = Some(x0(i));
+            }
+            keyed.push((i, base_x.unwrap_or_else(|| x0(i))));
+        }
+        keyed.sort_unstable_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
+        sc.placed.extend(keyed.into_iter().map(|(i, _)| i));
     } else {
         collide(glyphs, height, s.h, sc);
     }

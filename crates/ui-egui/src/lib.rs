@@ -1091,6 +1091,7 @@ pub enum OpenOutcome {
 
 impl PdfCraftApp {
     pub fn new() -> Self {
+        pdfcraft_engine::install_thai_faces();
         Self {
             session: Session::new(),
             views: Vec::new(),

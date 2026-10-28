@@ -1041,6 +1041,20 @@ pub fn calculations_changed(before: &[Field], after: &[Field]) -> Vec<String> {
         .collect()
 }
 
+/// A text value's length as `/MaxLen` and comb cells count it: grapheme clusters, so a Thai
+/// consonant with its vowel and tone marks (ที่) is one character.
+pub fn field_len(text: &str) -> usize {
+    use unicode_segmentation::UnicodeSegmentation as _;
+    text.graphemes(true).count()
+}
+
+/// The longest prefix of `text` with at most `max` characters as [`field_len`] counts them.
+pub fn clip_to_max_len(text: &str, max: usize) -> &str {
+    use unicode_segmentation::UnicodeSegmentation as _;
+    let end = text.grapheme_indices(true).nth(max).map_or(text.len(), |(i, _)| i);
+    text.get(..end).unwrap_or(text)
+}
+
 fn invalid<T>(m: impl Into<String>) -> Result<T, FormError> {
     Err(FormError::Invalid(m.into()))
 }
@@ -1049,7 +1063,7 @@ fn write_value(doc: &mut Document, f: &Field, value: &FieldValue, scripts: &mut 
     match (f.kind, value) {
         (FieldKind::Text, FieldValue::Text(t)) => {
             if let Some(max) = f.max_len
-                && t.chars().count() > max
+                && field_len(t) > max
             {
                 return invalid(format!("{:?} takes at most {max} characters", f.name));
             }
@@ -1257,8 +1271,8 @@ fn redraw(doc: &mut Document, f: &Field, values: &[String], scripts: &mut dyn Sc
     let mut undrawn = false;
     for w in &f.widgets {
         let (stream, missing) = match &shown {
-            Some(s) => appearance::field_appearance_drawn(doc, f, w, std::slice::from_ref(s), false),
-            None => appearance::field_appearance_drawn(doc, f, w, values, true),
+            Some(s) => appearance::field_appearance_written(doc, f, w, std::slice::from_ref(s), false),
+            None => appearance::field_appearance_written(doc, f, w, values, true),
         };
         undrawn |= missing.is_some();
         let existing_ap = in_place

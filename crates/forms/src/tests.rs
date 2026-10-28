@@ -4359,3 +4359,6 @@ fn comb_fields_show_their_cells() {
     let plain = saved_look(&doc, "d");
     assert!(!plain.contains(" m ") && plain.contains("(A) Tj"), "{plain}");
 }
+
+#[path = "thai_tests.rs"]
+mod thai;
