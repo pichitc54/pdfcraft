@@ -1058,8 +1058,8 @@ fn selection(ctx: &egui::Context, id: egui::Id, text: &str) -> std::ops::Range<u
 }
 
 /// The Format text panel for a rich text field's selection, under the field (above it when the
-/// window has no room below): what it changes applies to the selected characters, or to what is
-/// typed next at the caret.
+/// window has no room below) until it is dragged: what it changes applies to the selected
+/// characters, or to what is typed next at the caret.
 fn rich_panel(ctx: &egui::Context, view: &mut DocView, f: &FormField, widget: usize, rect: Rect, zoom: f32) {
     use crate::format_text_ui::{FieldFormat, FontChoice, Fonts};
     use crate::rich_field_ui::{FieldLook, PanelState};
@@ -1079,25 +1079,33 @@ fn rich_panel(ctx: &egui::Context, view: &mut DocView, f: &FormField, widget: us
     let t = crate::theme::Tokens::get(ctx);
     let mut font = None;
     let mut changed = false;
-    let shown =
-        egui::Area::new(egui::Id::new(("form-rich-panel", view.id.0))).order(egui::Order::Foreground).fixed_pos(egui::pos2(x, y)).show(ctx, |ui| {
-            egui::Frame::popup(ui.style()).show(ui, |ui| {
-                ui.set_width(PANEL_W);
-                let mut field = FieldFormat { strike: state.strike, vertical: state.vertical, families: crate::rich_field_ui::extra_families() };
-                let out = crate::format_text_ui::panel(
-                    ui,
-                    &t,
-                    &mut state.look,
-                    Some(&mut state.extras),
-                    Fonts { sources: None, shown: state.shown.clone() },
-                    Some(&mut field),
-                );
-                state.strike = field.strike;
-                state.vertical = field.vertical;
-                font = out.font;
-                changed = out.changed;
-            });
+    // Beside the field until it is dragged by its background; from then on it stays where it
+    // was left, for every rich text field, until the app quits.
+    let moved_id = egui::Id::new("form-rich-panel-moved");
+    let moved = ctx.data(|d| d.get_temp::<bool>(moved_id)).unwrap_or(false);
+    let area = egui::Area::new(egui::Id::new("form-rich-panel")).order(egui::Order::Foreground).constrain_to(ctx.content_rect());
+    let area = if moved { area } else { area.current_pos(egui::pos2(x, y)) };
+    let shown = area.show(ctx, |ui| {
+        egui::Frame::popup(ui.style()).show(ui, |ui| {
+            ui.set_width(PANEL_W);
+            let mut field = FieldFormat { strike: state.strike, vertical: state.vertical, families: crate::rich_field_ui::extra_families() };
+            let out = crate::format_text_ui::panel(
+                ui,
+                &t,
+                &mut state.look,
+                Some(&mut state.extras),
+                Fonts { sources: None, shown: state.shown.clone() },
+                Some(&mut field),
+            );
+            state.strike = field.strike;
+            state.vertical = field.vertical;
+            font = out.font;
+            changed = out.changed;
         });
+    });
+    if shown.response.dragged() {
+        ctx.data_mut(|d| d.insert_temp(moved_id, true));
+    }
     fx.panel_rect = Some(shown.response.rect);
     let family = match font {
         Some(FontChoice::Family(family)) => Some(family.label().to_string()),

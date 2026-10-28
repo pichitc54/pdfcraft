@@ -2,7 +2,7 @@
 
 What this personal fork adds to PdfCraft so Thai can be filled into forms, typed into comments and edited in existing PDFs on macOS, written so it can be rebuilt on any upstream release (ADR 0003). Terms in **bold** are defined in `GLOSSARY.md`.
 
-Status: written 2026-10-28 for the rebuild on v0.14.0, from the v0.9.0 fork (tag `thai-forms-v0.9`). Areas A–E built on v0.14.0 (branch `thai`); area E from issue pichitc54/pdfcraft#1. Area F specified, not built yet.
+Status: written 2026-10-28 for the rebuild on v0.14.0, from the v0.9.0 fork (tag `thai-forms-v0.9`). Areas A–E built on v0.14.0 (branch `thai`); area E from issue pichitc54/pdfcraft#1. Area F from issue pichitc54/pdfcraft#2.
 
 ## Principles
 
@@ -171,6 +171,8 @@ Not Thai-specific, but part of the fork so every rebuild carries it. Upstream (v
 - After the panel was dragged, opening another rich-text field shows the panel at the dragged spot.
 
 Full user stories and decisions: issue pichitc54/pdfcraft#2. Test seam: the UI harness (kittest pointer drags, as `ui-egui/tests/it/rich_fields.rs` already does for the panel).
+
+Last seen in (v0.14.0): `ui-egui/src/widgets.rs` (`show_placed_modal`: the shared modal anchored at a remembered offset, a background drag handle registered before the contents, `clamp_offset`), `ui-egui/src/dialogs.rs` (the one `Dialog` modal placed per dialog kind), `ui-egui/src/forms_ui.rs` (`rich_panel`: a movable area, `current_pos` beside the field until dragged). Upstream's two combine prompts call egui's modal directly and stay centred. Tests: `ui-egui/tests/it/movable_dialogs.rs`, `rich_fields::the_format_panel_drags_away_and_keeps_formatting_the_selection`.
 
 ## Out of scope
 

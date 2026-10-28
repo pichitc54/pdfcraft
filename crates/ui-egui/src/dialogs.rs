@@ -99,7 +99,7 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
     let t = Tokens::get(ctx);
     let mut close = false;
     let mut next = dialog;
-    let modal = widgets::show_modal(ctx, "dialog", |ui| {
+    let modal = widgets::show_placed_modal(ctx, "dialog", std::mem::discriminant(&dialog), |ui| {
         ui.set_width(match dialog {
             Dialog::Properties(_) => 640.0,
             Dialog::Print => 820.0,

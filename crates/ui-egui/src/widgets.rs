@@ -31,16 +31,66 @@ pub fn modal(ctx: &egui::Context, id: impl std::hash::Hash + std::fmt::Debug) ->
 }
 
 /// Show [`modal`], outline its controls, and remember the card rect for layout checks.
+///
+/// The card can be dragged by its empty background; where `id` was left is remembered for the
+/// session (see [`show_placed_modal`]).
 pub fn show_modal<R>(ctx: &egui::Context, id: &str, content: impl FnOnce(&mut egui::Ui) -> R) -> egui::ModalResponse<R> {
+    show_placed_modal(ctx, id, id, content)
+}
+
+/// [`show_modal`] whose position is remembered under `place` rather than its id, so dialogs
+/// sharing one modal (`Dialog`) each reopen where that kind was last left. Positions live in
+/// egui's temporary memory: centred again after a restart.
+pub fn show_placed_modal<R>(
+    ctx: &egui::Context,
+    id: &str,
+    place: impl std::hash::Hash + std::fmt::Debug,
+    content: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::ModalResponse<R> {
     let stored = egui::Id::new(id);
-    modal(ctx, id).show(ctx, |ui| {
+    let place = egui::Id::new(("modal-place", place));
+    let (raw, size) = ctx.data(|d| (d.get_temp::<egui::Vec2>(place).unwrap_or_default(), d.get_temp::<egui::Vec2>(place.with("size"))));
+    let screen = ctx.content_rect();
+    let offset = size.map_or(egui::Vec2::ZERO, |size| clamp_offset(raw, size, screen));
+    let area = egui::Modal::default_area(stored).anchor(Align2::CENTER_CENTER, offset);
+    modal(ctx, id).area(area).show(ctx, |ui| {
+        // Registered before the contents, so every control on the card is above it and keeps
+        // its own presses; last frame's card is where the background was.
+        if let Some(size) = size {
+            let card = Rect::from_center_size(screen.center() + offset, size);
+            let handle = ui.interact(card, place.with("drag"), Sense::drag());
+            if handle.dragged() {
+                let moved = clamp_offset(offset + handle.drag_delta(), size, screen);
+                ui.ctx().data_mut(|d| d.insert_temp(place, moved));
+                ui.ctx().request_repaint();
+            }
+        }
         begin_dialog(ui);
         let inner = content(ui);
         // The frame's stroke sits outside this content rect; the stored card is the fill.
         let card = ui.min_rect().expand2(egui::vec2(f32::from(DIALOG_PAD_X), f32::from(DIALOG_PAD_Y)));
-        ui.ctx().data_mut(|d| d.insert_temp(stored.with("card"), card));
+        ui.ctx().data_mut(|d| {
+            d.insert_temp(stored.with("card"), card);
+            d.insert_temp(place.with("size"), card.size());
+        });
         inner
     })
+}
+
+/// The offset from the window's centre that keeps a card of `size` inside `screen`; a card
+/// larger than the window keeps its top (and left) edge in view.
+fn clamp_offset(offset: egui::Vec2, size: egui::Vec2, screen: Rect) -> egui::Vec2 {
+    let half = (screen.size() - size) * 0.5;
+    let axis = |v: f32, h: f32| {
+        if !v.is_finite() {
+            0.0
+        } else if h >= 0.0 {
+            v.clamp(-h, h)
+        } else {
+            -h
+        }
+    };
+    egui::vec2(axis(offset.x, half.x), axis(offset.y, half.y))
 }
 
 /// Outlined controls at a shared 30-point height, with a focus stroke and 4-point corners.
