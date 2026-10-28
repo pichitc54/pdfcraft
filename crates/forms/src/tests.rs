@@ -4362,3 +4362,6 @@ fn comb_fields_show_their_cells() {
 
 #[path = "thai_tests.rs"]
 mod thai;
+
+#[path = "rich_tests.rs"]
+mod rich;

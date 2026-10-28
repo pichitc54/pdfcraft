@@ -34,6 +34,9 @@ use pdfcraft_fonts::thai::{self, ThaiFace, ThaiFaces};
 use pdfcraft_fonts::{UnicodeCMap, cjk_width, helvetica_width, literal, win_ansi, wrap_with};
 use unicode_segmentation::UnicodeSegmentation as _;
 
+#[path = "rich_appearance.rs"]
+mod rich_layout;
+
 use crate::{Field, FieldKind, Widget, acroform, flags};
 
 /// Format a number for content streams.
@@ -794,7 +797,10 @@ pub(crate) fn field_appearance_written_with(
     format: bool,
     faces: Option<&ThaiFaces>,
 ) -> (Stream, Option<char>) {
-    if let Some(faces) = faces {
+    // A rich value draws each run in its own face; a plain one may switch to the Thai face.
+    if !rich_layout::prepare(doc, f, w, values, format, faces)
+        && let Some(faces) = faces
+    {
         use_thai_face(doc, f, w, values, format, faces);
     }
     field_appearance_drawn(doc, f, w, values, format)
@@ -965,6 +971,13 @@ fn field_appearance_fit(doc: &Document, f: &Field, w: &Widget, values: &[String]
     let place = placement(mk_rotation(doc, &wd), page_w, page_h);
     let (width, height) = (place.layout_w, place.layout_h);
     let da = widget_da(doc, f, &wd);
+    // A rich value it still shows (and no Format script rewrote the text): drawn run by run.
+    if f.kind == FieldKind::Text
+        && !(format && f.actions.format != crate::af::Format::None)
+        && let Some(rv) = rich_layout::rich_for(doc, f, &text)
+    {
+        return rich_layout::draw(doc, f, &wd, place, &da, &rv);
+    }
     let strings = shown_strings(f, &text);
     let (font_name, font_obj, enc) = match dr_font(doc, &da.font).filter(|(_, enc)| strings.iter().all(|s| enc.can_encode(s))) {
         Some((o, enc)) => (da.font.clone(), o, enc),

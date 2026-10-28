@@ -22,6 +22,7 @@ pub mod appearance;
 mod author;
 mod calc_order;
 pub mod detect;
+pub mod rich;
 mod scripting;
 pub mod table;
 pub use actions::{FieldAction, Trigger, field_action_chains, field_actions, set_field_actions};
@@ -145,9 +146,23 @@ pub struct Field {
     pub actions: af::Actions,
     /// Push buttons: what a click does.
     pub button: Option<af::ButtonAction>,
+    /// Text fields that allow rich text formatting: the rich value (`/RV`), when it reads. It
+    /// describes the value only while it shows the same text ([`rich::RichValue::shows`]).
+    pub rich: Option<rich::RichValue>,
 }
 
 impl Field {
+    /// Whether the field takes a rich value: a text field that allows rich text formatting and
+    /// is neither a comb nor a password field (docs/thai-forms-spec.md area E).
+    pub fn allows_rich(&self) -> bool {
+        self.kind == FieldKind::Text && self.has(flags::RICH_TEXT) && !self.has(flags::COMB) && !self.has(flags::PASSWORD)
+    }
+
+    /// The rich value, when the field takes one and it shows the current value.
+    pub fn rich_value(&self) -> Option<&rich::RichValue> {
+        self.rich.as_ref().filter(|r| self.allows_rich() && r.shows(&self.value.first().cloned().unwrap_or_default()))
+    }
+
     pub fn has(&self, flag: u32) -> bool {
         self.flags & flag != 0
     }
@@ -214,6 +229,9 @@ pub enum FieldValue {
     Radio(Option<String>),
     /// Combo box or list box: export values (several only for multi-select lists).
     Choice(Vec<String>),
+    /// Text field that allows rich text formatting: the formatted value. Its plain text becomes
+    /// `/V`; a field that doesn't take rich values gets only that.
+    Rich(rich::RichValue),
 }
 
 // ── reading ─────────────────────────────────────────────────────────────────────────────────
@@ -911,7 +929,33 @@ fn walk(
         widgets,
         actions,
         button,
+        rich: (kind == FieldKind::Text && ff & flags::RICH_TEXT != 0).then(|| rich_of(doc, d)).flatten(),
     });
+}
+
+/// The field dictionary's `/RV` (a text string or stream), read.
+pub(crate) fn rich_of(doc: &Document, d: &Dict) -> Option<rich::RichValue> {
+    let xhtml = match &*doc.resolve(d.get(b"RV")?) {
+        Object::String(s) => s.to_text(),
+        Object::Stream(st) => String::from_utf8_lossy(&st.decoded_within(rich::MAX_RV_BYTES).ok()?).into_owned(),
+        _ => return None,
+    };
+    rich::parse(&xhtml)
+}
+
+/// A default style string (`/DS`, §12.7.4.3) from a `/DA`: its font size and colour, Helvetica.
+fn default_style(da: &str) -> String {
+    let da = appearance::parse_da(da);
+    let size = if da.size > 0.0 { da.size } else { 12.0 };
+    let toks: Vec<f64> = da.color.split_whitespace().filter_map(|t| t.parse().ok()).collect();
+    let rgb = match toks.as_slice() {
+        [g] => [*g; 3],
+        [r, g, b] => [*r, *g, *b],
+        [c, m, y, k] => [(1.0 - c) * (1.0 - k), (1.0 - m) * (1.0 - k), (1.0 - y) * (1.0 - k)],
+        _ => [0.0; 3],
+    };
+    let c = |v: f64| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    format!("font: Helvetica {}pt; color:#{:02x}{:02x}{:02x}", appearance::fmt(size), c(rgb[0]), c(rgb[1]), c(rgb[2]))
 }
 
 fn field_flags(doc: &Document, dict: &Dict) -> Option<u32> {
@@ -1061,7 +1105,14 @@ fn invalid<T>(m: impl Into<String>) -> Result<T, FormError> {
 
 fn write_value(doc: &mut Document, f: &Field, value: &FieldValue, scripts: &mut dyn Scripts) -> Result<(), FormError> {
     match (f.kind, value) {
-        (FieldKind::Text, FieldValue::Text(t)) => {
+        (FieldKind::Text, FieldValue::Text(_) | FieldValue::Rich(_)) => {
+            // A rich value only where the field takes one; elsewhere its plain text.
+            let (plain, rich) = match value {
+                FieldValue::Rich(r) => (r.plain_text(), f.allows_rich().then_some(r)),
+                FieldValue::Text(t) => (t.clone(), None),
+                _ => return invalid(format!("{:?} is a text field", f.name)),
+            };
+            let t = &plain;
             if let Some(max) = f.max_len
                 && field_len(t) > max
             {
@@ -1071,13 +1122,26 @@ fn write_value(doc: &mut Document, f: &Field, value: &FieldValue, scripts: &mut 
             let t = &af::keystroke(&f.actions.format, &f.name, t).map_err(FormError::Format)?;
             af::validate(&f.actions.validate, t).map_err(FormError::Invalid)?;
             let t = &scripting::accept(doc, f, t, scripts)?;
+            // A script that changed the text leaves it plain: formatting can't follow it.
+            let rv = rich.filter(|r| r.shows(t)).map(|r| r.clone().normalized().to_xhtml());
+            let ds = rv.as_ref().map(|_| default_style(&f.da));
             doc.update_dict(f.obj, |d| {
                 if t.is_empty() {
                     d.remove(b"V");
                 } else {
                     d.set(b"V".to_vec(), PdfString::text(t));
                 }
-                d.remove(b"RV");
+                match &rv {
+                    Some(rv) if !t.is_empty() => {
+                        d.set(b"RV".to_vec(), PdfString::text(rv));
+                        if !d.contains(b"DS") {
+                            d.set(b"DS".to_vec(), PdfString::text(ds.as_deref().unwrap_or_default()));
+                        }
+                    }
+                    _ => {
+                        d.remove(b"RV");
+                    }
+                }
             })?;
             redraw(doc, f, std::slice::from_ref(t), scripts)
         }
@@ -1097,7 +1161,7 @@ fn write_value(doc: &mut Document, f: &Field, value: &FieldValue, scripts: &mut 
                     }
                 }
                 FieldValue::Radio(None) => false,
-                FieldValue::Choice(_) => return invalid(format!("{:?} is a check box: use true or false", f.name)),
+                FieldValue::Choice(_) | FieldValue::Rich(_) => return invalid(format!("{:?} is a check box: use true or false", f.name)),
             };
             set_states(doc, f, on.then_some(state.as_str()))
         }
