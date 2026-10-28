@@ -2,7 +2,7 @@
 
 What this personal fork adds to PdfCraft so Thai can be filled into forms, typed into comments and edited in existing PDFs on macOS, written so it can be rebuilt on any upstream release (ADR 0003). Terms in **bold** are defined in `GLOSSARY.md`.
 
-Status: written 2026-10-28 for the rebuild on v0.14.0, from the v0.9.0 fork (tag `thai-forms-v0.9`). All four areas rebuilt on v0.14.0 (branch `thai`).
+Status: written 2026-10-28 for the rebuild on v0.14.0, from the v0.9.0 fork (tag `thai-forms-v0.9`). Areas A–D rebuilt on v0.14.0 (branch `thai`); area E specified (issue pichitc54/pdfcraft#1), not yet built.
 
 ## Principles
 
@@ -12,7 +12,7 @@ Status: written 2026-10-28 for the rebuild on v0.14.0, from the v0.9.0 fork (tag
    - ADR 0001: Thai field values are drawn in Sarabun, found at runtime first and embedded whole as a real TrueType font, so other viewers can redraw the field.
    - ADR 0002: Edit text may embed fonts installed on this Mac when their OS/2 `fsType` allows it.
 4. **Upstream's repo rules still apply**: never panic, quality gates, scoped builds. Its font rule (only open-licensed fonts from craft-fonts may enter a PDF) does not (ADRs 0001, 0002).
-5. **Each area ships on its own**, in the order A → B → C → D.
+5. **Each area ships on its own**, in the order A → B → C → D → E.
 
 ## Rebuild playbook
 
@@ -122,6 +122,30 @@ Last seen in (v0.14.0): `annot/src/appearance.rs` (`thai_face_for`, `build_with`
 
 Last seen in (v0.14.0): `fonts/src/installed.rs`, `fonts/src/thai.rs` (repair_sara_am, line_breaks), `edit/src/text.rs` (`LineEdit::notice`; the repair runs after the bidi pass in `text_lines`), `edit/src/text_regions.rs` (`thai_fallback`, `installed_full_face`, `splits_only_between_clusters`, MIN_FIT, `wrap_rows` inside `rewrite_styled_block`), `engine` (install_thai_faces installs the font folders; `edit_font_notices`), `ui-egui/src/editing.rs` (the notice toast); tests `edit/src/thai_tests.rs`.
 Upstream at v0.14.0 shapes complex edits itself (`shape_source`) once a full face sits in the page's font resources, and otherwise asks the user to load one (RegisterTextFont); the fork's installed face and Sarabun fallback are embedded as page fonts first, so upstream's shaping picks them up.
+
+## E. Rich-text formatting in field values
+
+Full user stories, decisions and test seams: issue pichitc54/pdfcraft#1. Upstream (v0.14.0) has only the "Allow Rich Text Formatting" flag and deletes `/RV` on every set (storytold/pdfcraft#2188).
+
+### Rules
+
+- **Only fields that allow rich text formatting** hold a **rich value** (`/RV`, ISO 32000-2 §12.7.4.3) beside the plain field value (`/V`), always in step. Comb and password fields ignore formatting; a value set by a script or calculation is plain (its `/RV` removed).
+- **Formats applied to selected words** (**styled runs**): bold, italic, underline, strikethrough, colour, size, font family, superscript, subscript, character spacing, horizontal scale. Per **rich paragraph**: alignment (left, centre, right, justified).
+- **Shown, not applied**: line spacing and paragraph spacing another app saved (applying them would break the line pitch rule). Markup PdfCraft doesn't understand stays untouched until the field is edited; an edit writes back what PdfCraft can show.
+- **Controls**: upstream's Format text panel opens with a rich-text field's fill editor (a strikethrough toggle added; line/paragraph spacing and lists disabled), plus ⌘B / ⌘I / ⌘U. The editor shows the formatting; typing continues the style before the caret; paste is plain.
+- **Font list**: Helvetica, Times, Courier, Sarabun, and installed fonts whose fsType allows embedding (ADR 0002), embedded whole in `/DR`. No "Load font…".
+- **Thai**: Thai characters in a run whose family can't draw them are drawn in Sarabun in that run's style. Runs without a family follow area A (the whole value in Sarabun when the field font can't draw it).
+- **Sizes**: runs given a size keep it; in an Auto size field the rest fit together. A line is 1.15 × its largest size high; the first line follows area A's stacked-mark rule.
+
+### Acceptance examples
+
+- "ชื่อ: **สมชาย** ใจดี" in a rich-text field: saved `/RV` holds a bold span, `/V` is the plain text, the appearance draws สมชาย in Sarabun Bold and the rest in Sarabun Regular; Preview shows the same.
+- A hand-written `/RV` with colour, underline, superscript and a centred paragraph opens with all of it shown, and survives save and reopen unchanged when not edited.
+- A Latin word set in Times inside a Thai value: the Latin in Times, the Thai beside it in Sarabun.
+- A malformed `/RV` opens showing the plain `/V`, without a crash.
+- ⌘B on a selection in an ordinary (not rich-text) field does nothing.
+
+Test seams: the engine's set-field-value edit / form-fill tool (what lands in the PDF) and the UI harness (editor and panel behaviour).
 
 ## Out of scope
 

@@ -8,6 +8,18 @@ Filling AcroForm fields with Thai text so it reads correctly both inside PdfCraf
 The text a field holds (`/V`), independent of how it looks.
 _Avoid_: content, data
 
+**Rich value**:
+The formatted version of a field value (`/RV`), kept beside the plain field value in fields that allow rich text formatting: the same text, divided into styled runs.
+_Avoid_: rich text (for the value itself), RTF, formatted value
+
+**Styled run**:
+A stretch of a rich value with one style: font family, size, bold, italic, underline, strikethrough, colour, superscript or subscript, character spacing and horizontal scale.
+_Avoid_: span (the markup), segment
+
+**Rich paragraph**:
+A paragraph of a rich value, with its own alignment (left, centre, right or justified); another app may also have given it spacing before and after and a line spacing, which PdfCraft shows but doesn't let you change.
+_Avoid_: block, line (a paragraph may wrap onto several lines)
+
 **Appearance**:
 The drawing of a field that viewers show and print (its normal appearance stream). It is regenerated from the field value whenever the value is set.
 _Avoid_: rendering, AP (in prose)
