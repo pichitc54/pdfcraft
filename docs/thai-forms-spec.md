@@ -170,7 +170,7 @@ Not Thai-specific, but part of the fork so every rebuild carries it. Upstream (v
 - While filling a rich-text field, dragging the Format text panel away and then clicking Bold makes the selected words bold; the field stays in the fill editor.
 - After the panel was dragged, opening another rich-text field shows the panel at the dragged spot.
 
-Test seam: the UI harness (kittest pointer drags, as `ui-egui/tests/it/rich_fields.rs` already does for the panel).
+Full user stories and decisions: issue pichitc54/pdfcraft#2. Test seam: the UI harness (kittest pointer drags, as `ui-egui/tests/it/rich_fields.rs` already does for the panel).
 
 ## Out of scope
 
