@@ -2,7 +2,7 @@
 
 What this personal fork adds to PdfCraft so Thai can be filled into forms, typed into comments and edited in existing PDFs on macOS, written so it can be rebuilt on any upstream release (ADR 0003). Terms in **bold** are defined in `GLOSSARY.md`.
 
-Status: written 2026-10-28 for the rebuild on v0.14.0, from the v0.9.0 fork (tag `thai-forms-v0.9`). Areas A–D rebuilt on v0.14.0 (branch `thai`); area E specified (issue pichitc54/pdfcraft#1), not yet built.
+Status: written 2026-10-28 for the rebuild on v0.14.0, from the v0.9.0 fork (tag `thai-forms-v0.9`). All five areas (A–E) built on v0.14.0 (branch `thai`); area E from issue pichitc54/pdfcraft#1.
 
 ## Principles
 
@@ -146,6 +146,8 @@ Full user stories, decisions and test seams: issue pichitc54/pdfcraft#1. Upstrea
 - ⌘B on a selection in an ordinary (not rich-text) field does nothing.
 
 Test seams: the engine's set-field-value edit / form-fill tool (what lands in the PDF) and the UI harness (editor and panel behaviour).
+
+Last seen in (v0.14.0): `forms/src/rich.rs` (model, `/RV` reader and writer), `forms/src/lib.rs` (`Field::rich`, `allows_rich`, `FieldValue::Rich` in `write_value`), `forms/src/rich_appearance.rs` (a child module of the appearance code: pens, layout, `prepare`/`draw`), `automation/src/forms.rs` (`{"rich": …}` in form_fill, `rich` in form_fields), `ui-egui/src/rich_field_ui.rs` (the editor's per-character styles, layouter, panel mapping), `ui-egui/src/forms_ui.rs` (`Focus::rich`, ⌘B/⌘I/⌘U, `rich_panel`), `ui-egui/src/format_text_ui.rs` (`FieldFormat`: strikethrough, superscript, subscript, more families), `ui-egui/src/commands.rs` (⌘B/⌘I/⌘U left to a rich field: upstream binds ⌘B to New bookmark). Tests: `forms/src/rich_tests.rs`, `automation/tests/it/rich_form_fill.rs`, `engine/tests/it/thai_forms.rs`, `ui-egui/tests/it/rich_fields.rs`.
 
 ## Out of scope
 
