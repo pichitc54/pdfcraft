@@ -111,6 +111,7 @@ mod panels;
 mod pickers;
 pub mod prepare;
 mod print_ui;
+pub mod rich_field_ui;
 mod signature_drag;
 pub mod units;
 mod web_print;

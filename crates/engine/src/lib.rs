@@ -70,6 +70,17 @@ pub use pdfcraft_forms::{
     calculations_changed as form_calculations_changed, clip_to_max_len, field_len, flags as field_flags, rich as form_rich,
 };
 
+/// Whether a Thai document face (Sarabun) was installed at start-up.
+pub fn thai_document_face_found() -> bool {
+    pdfcraft_fonts::thai::installed_document_faces().is_some()
+}
+
+/// The families installed on this computer whose fonts may be embedded (their fsType allows it):
+/// what a rich text field's font list offers beyond the standard ones.
+pub fn embeddable_installed_families() -> Vec<String> {
+    pdfcraft_fonts::installed::index().map(|i| i.embeddable_families()).unwrap_or_default()
+}
+
 /// Find and install the Thai document face (Sarabun) that filled form fields and comments draw
 /// Thai with (ADR 0001), and the font folders Edit text searches for a complete copy of a PDF's
 /// subset font (ADR 0002); call once at start-up. Returns whether a Thai face was found.

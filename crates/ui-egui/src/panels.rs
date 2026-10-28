@@ -540,7 +540,7 @@ fn format_section(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens) {
             .map(|f| (f.resource, f.face))
             .collect();
         let shown = ed.font_shown(&sources);
-        let out = crate::format_text_ui::panel(ui, t, &mut ed.look, Some(&mut ed.extras), Fonts { sources: Some(&sources), shown });
+        let out = crate::format_text_ui::panel(ui, t, &mut ed.look, Some(&mut ed.extras), Fonts { sources: Some(&sources), shown }, None);
         let mut changed = out.changed;
         match out.font {
             Some(FontChoice::KeepSource) => {
@@ -560,7 +560,8 @@ fn format_section(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens) {
             Some(FontChoice::Installed(path)) => app.use_paths(crate::files::FilePurpose::TextFont { page: ed.page }, &[path]),
             #[cfg(target_arch = "wasm32")]
             Some(FontChoice::Installed(_)) => {}
-            None => {}
+            // Only rich text fields offer families by name.
+            Some(FontChoice::Named(_)) | None => {}
         }
         if changed {
             app.apply_line_format(i, ed, Some(ui.ctx()));
@@ -620,7 +621,7 @@ fn format_section(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens) {
 /// Format text for added text: the standard families, size, colour, style and alignment.
 fn added_text_format(ui: &mut egui::Ui, t: &Tokens, style: &mut pdfcraft_engine::AddedText) {
     let shown = style.family.label().to_string();
-    let out = crate::format_text_ui::panel(ui, t, style, None, crate::format_text_ui::Fonts { sources: None, shown });
+    let out = crate::format_text_ui::panel(ui, t, style, None, crate::format_text_ui::Fonts { sources: None, shown }, None);
     if let Some(crate::format_text_ui::FontChoice::Family(family)) = out.font {
         style.family = family;
     }
