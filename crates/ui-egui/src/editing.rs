@@ -183,6 +183,10 @@ impl PdfCraftApp {
                 if let Some(n) = self.session.get(id).and_then(|d| d.edit_notices.first()).cloned() {
                     self.notify(crate::content_ui::undrawn_message(&n));
                 }
+                // An edited paragraph set in another font (Sarabun) than the text around it.
+                if let Some(n) = self.session.get(id).and_then(|d| d.edit_font_notices.first()).cloned() {
+                    self.notify(n);
+                }
                 let out = self.session.take_js_output(id);
                 self.handle_js(id, out);
                 true

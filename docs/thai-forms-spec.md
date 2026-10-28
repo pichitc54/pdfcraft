@@ -2,7 +2,7 @@
 
 What this personal fork adds to PdfCraft so Thai can be filled into forms, typed into comments and edited in existing PDFs on macOS, written so it can be rebuilt on any upstream release (ADR 0003). Terms in **bold** are defined in `GLOSSARY.md`.
 
-Status: written 2026-10-28 for the rebuild on v0.14.0, from the v0.9.0 fork (tag `thai-forms-v0.9`). Areas A and B rebuilt on v0.14.0 (branch `thai`); C and D not yet.
+Status: written 2026-10-28 for the rebuild on v0.14.0, from the v0.9.0 fork (tag `thai-forms-v0.9`). All four areas rebuilt on v0.14.0 (branch `thai`).
 
 ## Principles
 
@@ -92,7 +92,7 @@ Last seen in (v0.14.0): `ui-egui/src/forms_ui.rs` (LINE_PITCH, pitched_job, MaxL
 - A text box, a callout and a Fill & Sign text holding "สวัสดีครับ" render correctly, flatten without a refusal, and read back as typed.
 - A text box holding Chinese behaves exactly as on plain upstream.
 
-Last seen in (v0.9.0): `annot/src/appearance.rs`, `annot/src/lib.rs`.
+Last seen in (v0.14.0): `annot/src/appearance.rs` (`thai_face_for`, `build_with`), `annot/src/lib.rs` (`draw_appearance`, `thai_text`, catalog `/PCThaiFonts`); tests `annot/src/thai_tests.rs`. The old patch applied almost unchanged.
 
 ## D. Editing existing Thai text
 
@@ -120,7 +120,8 @@ Last seen in (v0.9.0): `annot/src/appearance.rs`, `annot/src/lib.rs`.
 - Chrome-made "น้ำ" and "เป็น" (ActualText) edit and read back as typed.
 - No macOS "access data from other apps" prompt at start-up.
 
-Last seen in (v0.9.0): `fonts/src/installed.rs`, `fonts/src/thai.rs` (repair_sara_am), `edit/src/text_regions.rs` (MIN_FIT, wrap), `edit/src/text.rs`, `engine` (edit_font_notices).
+Last seen in (v0.14.0): `fonts/src/installed.rs`, `fonts/src/thai.rs` (repair_sara_am, line_breaks), `edit/src/text.rs` (`LineEdit::notice`; the repair runs after the bidi pass in `text_lines`), `edit/src/text_regions.rs` (`thai_fallback`, `installed_full_face`, `splits_only_between_clusters`, MIN_FIT, `wrap_rows` inside `rewrite_styled_block`), `engine` (install_thai_faces installs the font folders; `edit_font_notices`), `ui-egui/src/editing.rs` (the notice toast); tests `edit/src/thai_tests.rs`.
+Upstream at v0.14.0 shapes complex edits itself (`shape_source`) once a full face sits in the page's font resources, and otherwise asks the user to load one (RegisterTextFont); the fork's installed face and Sarabun fallback are embedded as page fonts first, so upstream's shaping picks them up.
 
 ## Out of scope
 

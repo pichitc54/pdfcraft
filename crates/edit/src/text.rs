@@ -671,6 +671,9 @@ fn union(a: [f64; 4], b: [f64; 4]) -> [f64; 4] {
 pub struct LineEdit {
     /// `Some(font)` when the line's font couldn't show the new text and Helvetica was used.
     pub substituted: Option<String>,
+    /// Why the edit looks different from the text around it, for the interface to show (e.g. the
+    /// paragraph was set in Sarabun because its font isn't installed).
+    pub notice: Option<String>,
 }
 
 #[derive(Clone)]
@@ -1581,6 +1584,13 @@ fn text_lines_in(doc: &Document, p: &pdfcraft_model::Page, actual_text: bool) ->
         l.text = crate::bidi::to_logical(&l.text);
         // The runs hold the text in drawing order, which no longer reads as the line does.
         if l.text != shown {
+            l.runs.clear();
+        }
+    }
+    // Word stores สระอำ's nikhahit as a space: read "ก า" as "กำ" so edits write ำ back.
+    for l in &mut lines {
+        if let std::borrow::Cow::Owned(repaired) = pdfcraft_fonts::thai::repair_sara_am(&l.text) {
+            l.text = repaired;
             l.runs.clear();
         }
     }
@@ -2574,7 +2584,7 @@ pub(crate) fn replace_line_with_limit(doc: &mut Document, page: usize, line: usi
             d.set(b"Resources".to_vec(), Object::Dict(res));
         }
     })?;
-    Ok(LineEdit { substituted })
+    Ok(LineEdit { substituted, notice: None })
 }
 
 /// The size of the last `Tf` before operator `at`.
@@ -3297,7 +3307,7 @@ fn rewrite_block_from(
             d.set(b"Resources".to_vec(), Object::Dict(res));
         }
     })?;
-    Ok(LineEdit { substituted })
+    Ok(LineEdit { substituted, notice: None })
 }
 
 /// The cover (when [`BlockStyle::cover`] asks for one) and visible rendering that start a

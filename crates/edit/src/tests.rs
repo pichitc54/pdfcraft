@@ -7375,3 +7375,6 @@ fn a_run_of_spaces_in_a_subset_without_a_space_glyph_keeps_its_width() {
     let content = String::from_utf8_lossy(&page_content_bytes(&reopen(&doc), 0)).into_owned();
     assert_eq!(content.matches("[-330] TJ").count(), 5, "{content}");
 }
+
+#[path = "thai_tests.rs"]
+mod thai;

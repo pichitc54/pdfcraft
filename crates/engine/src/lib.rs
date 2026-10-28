@@ -70,9 +70,13 @@ pub use pdfcraft_forms::{
     calculations_changed as form_calculations_changed, clip_to_max_len, field_len, flags as field_flags,
 };
 
-/// Find and install the Thai document face (Sarabun) that filled form fields draw Thai with
-/// (ADR 0001); call once at start-up. Returns whether one was found.
+/// Find and install the Thai document face (Sarabun) that filled form fields and comments draw
+/// Thai with (ADR 0001), and the font folders Edit text searches for a complete copy of a PDF's
+/// subset font (ADR 0002); call once at start-up. Returns whether a Thai face was found.
 pub fn install_thai_faces() -> bool {
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let env = std::env::var_os(pdfcraft_fonts::thai::DIR_VAR);
+    pdfcraft_fonts::installed::install_font_dirs(pdfcraft_fonts::installed::search_dirs(env.as_deref(), home.as_deref()));
     match pdfcraft_fonts::thai::install_from_environment() {
         Some(faces) => {
             log::info!("Thai document font: {} ({:?})", faces.regular.family, faces.regular.source);
@@ -459,6 +463,9 @@ pub struct Document {
     /// What the last successful [`Session::apply`] wrote that its fonts can't draw: kept as typed,
     /// drawn with `?` in its place (see [`TextNotice`]). The interface shows it; tools return it.
     pub edit_notices: Vec<TextNotice>,
+    /// Why the last successful [`Session::apply`] looks different from the text around it (an
+    /// edited paragraph set in Sarabun because its font isn't installed). The interface shows it.
+    pub edit_font_notices: Vec<String>,
 }
 
 /// Text an edit stored as typed but drew with `?` in place of `ch`, because the font it is drawn
@@ -2466,6 +2473,9 @@ fn check_permission(edit: &Edit, p: &pdfcraft_cos::Permissions) -> Result<(), Ed
 
 /// Dates and unique ids stamped onto what an edit creates.
 struct EditCtx {
+    /// Why an edit looks different from the text around it (a paragraph set in Sarabun because
+    /// its font isn't installed), for the interface to show.
+    font_notices: Vec<String>,
     /// Field scripts run (`None`: JavaScript is off) and what they produced.
     js: Option<js::JsRunner>,
     /// A laid-out XFA form's template (`None`: not an XFA form, or JavaScript is off) and what
@@ -2518,6 +2528,7 @@ impl EditCtx {
             count: 0,
             renamed_fields: Vec::new(),
             redaction_overlays: Vec::new(),
+            font_notices: Vec::new(),
         }
     }
 
@@ -2829,7 +2840,8 @@ fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut EditCtx) -> 
         }
         Edit::MoveObjects { page, objects, offset } => pdfcraft_edit::move_objects(doc, *page, objects, *offset)?,
         Edit::EditTextBlock { page, block, text, style } => {
-            pdfcraft_edit::rewrite_block(doc, *page, *block, Some(text), style)?;
+            let edit = pdfcraft_edit::rewrite_block(doc, *page, *block, Some(text), style)?;
+            cx.font_notices.extend(edit.notice);
         }
         Edit::RegisterTextFont { page, bytes } => {
             pdfcraft_edit::text::register_text_font(doc, *page, bytes)?;
@@ -3957,6 +3969,7 @@ impl Session {
             fonts_stale: false,
             xfa_warnings: Vec::new(),
             edit_notices: Vec::new(),
+            edit_font_notices: Vec::new(),
         }
     }
 
@@ -3971,6 +3984,7 @@ impl Session {
         let js_off = self.js_off;
         let doc = self.doc_mut(id)?;
         doc.edit_notices.clear();
+        doc.edit_font_notices.clear();
         let name = doc.name.clone();
         let is_xfa = doc.info.xfa.is_some();
         let mut scope = scope_of(&edit);
@@ -4149,6 +4163,7 @@ impl Session {
         doc.dirty = true;
         doc.generation += 1;
         doc.edit_notices = notices;
+        doc.edit_font_notices = std::mem::take(&mut cx.font_notices);
         if !cx.xfa_removed.is_empty() {
             let removed: Vec<String> = cx.xfa_removed.iter().map(|n| format!("{XFA_REMOVED_PREFIX}{n}")).collect();
             doc.xfa_warnings.retain(|w| w.starts_with(XFA_REMOVED_PREFIX));
@@ -4194,6 +4209,7 @@ impl Session {
             return Err(e);
         }
         doc.edit_notices.clear();
+        doc.edit_font_notices.clear();
         Self::sync_dirty(doc);
         doc.generation += 1;
         Ok(label)
@@ -4223,6 +4239,7 @@ impl Session {
             return Err(e);
         }
         doc.edit_notices.clear();
+        doc.edit_font_notices.clear();
         Self::sync_dirty(doc);
         doc.generation += 1;
         Ok(label)

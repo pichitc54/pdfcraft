@@ -1,5 +1,6 @@
 //! The Thai document face (Sarabun), found at runtime first, for field appearances (ADR 0001):
-//! shaping, whole-font embedding as a Type 0 font, and Thai word wrapping.
+//! shaping, whole-font embedding as a Type 0 font, Thai word wrapping and line breaks, and the
+//! สระอำ repair Edit text reads Word's Thai with.
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -565,8 +566,46 @@ pub fn wrap(face: &ThaiFace, text: &str, size: f64, width: f64) -> Vec<String> {
     lines
 }
 
+/// `text` with สระอำ restored where a producer (Word) stored its nikhahit as a space: a Thai
+/// character, a space and sara aa read as sara am. Sara aa never starts a Thai word, so a space
+/// before it can only be that glyph.
+pub fn repair_sara_am(text: &str) -> std::borrow::Cow<'_, str> {
+    if !text.contains(" \u{0e32}") {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    let thai = |c: char| ('\u{0e01}'..='\u{0e4e}').contains(&c);
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while let Some(&c) = chars.get(i) {
+        if c == ' ' && chars.get(i + 1) == Some(&'\u{0e32}') && i > 0 && chars.get(i - 1).is_some_and(|p| thai(*p)) {
+            out.push('\u{0e33}');
+            i += 2;
+        } else {
+            out.push(c);
+            i += 1;
+        }
+    }
+    std::borrow::Cow::Owned(out)
+}
+
+/// Where `text` may break between lines (UAX #14, with dictionary word boundaries for Thai), as
+/// character indices, excluding the start.
+pub fn line_breaks(text: &str) -> Vec<usize> {
+    let segmenter = icu_segmenter::LineSegmenter::new_dictionary(Default::default());
+    let breaks: std::collections::HashSet<usize> = segmenter.segment_str(text).collect();
+    // Byte offsets to character indices.
+    text.char_indices()
+        .map(|(byte, _)| byte)
+        .chain(std::iter::once(text.len()))
+        .enumerate()
+        .filter(|&(i, byte)| i > 0 && breaks.contains(&byte))
+        .map(|(i, _)| i)
+        .collect()
+}
+
 /// The font files in `dirs`, folder by folder in the given order and by name within a folder.
-fn font_files(dirs: &[PathBuf]) -> impl Iterator<Item = PathBuf> + '_ {
+pub(crate) fn font_files(dirs: &[PathBuf]) -> impl Iterator<Item = PathBuf> + '_ {
     dirs.iter().flat_map(|dir| {
         let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
             .into_iter()
@@ -581,7 +620,7 @@ fn font_files(dirs: &[PathBuf]) -> impl Iterator<Item = PathBuf> + '_ {
 }
 
 /// The file's bytes, if it is a regular file no larger than [`MAX_BYTES`].
-fn read_font(path: &Path) -> Option<Arc<[u8]>> {
+pub(crate) fn read_font(path: &Path) -> Option<Arc<[u8]>> {
     let meta = std::fs::metadata(path).ok()?;
     if !meta.is_file() || meta.len() > MAX_BYTES {
         return None;
@@ -604,12 +643,12 @@ fn thai_faces(bytes: &[u8]) -> Vec<(String, Option<Style>, u32)> {
 }
 
 /// The typographic name (IDs 16/17), else the legacy one (IDs 1/2), cut to [`MAX_NAME`].
-fn name(font: &FontRef, typographic: StringId, legacy: StringId) -> Option<String> {
+pub(crate) fn name(font: &FontRef, typographic: StringId, legacy: StringId) -> Option<String> {
     let s = font.localized_strings(typographic).english_or_first().or_else(|| font.localized_strings(legacy).english_or_first())?;
     Some(s.chars().take(MAX_NAME).collect())
 }
 
-fn style_named(subfamily: &str) -> Option<Style> {
+pub(crate) fn style_named(subfamily: &str) -> Option<Style> {
     match subfamily.trim().to_ascii_lowercase().as_str() {
         "regular" | "normal" | "book" => Some(Style::Regular),
         "bold" => Some(Style::Bold),
