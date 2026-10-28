@@ -2,7 +2,7 @@
 
 What this personal fork adds to PdfCraft so Thai can be filled into forms, typed into comments and edited in existing PDFs on macOS, written so it can be rebuilt on any upstream release (ADR 0003). Terms in **bold** are defined in `GLOSSARY.md`.
 
-Status: written 2026-10-28 for the rebuild on v0.14.0, from the v0.9.0 fork (tag `thai-forms-v0.9`). All five areas (A–E) built on v0.14.0 (branch `thai`); area E from issue pichitc54/pdfcraft#1.
+Status: written 2026-10-28 for the rebuild on v0.14.0, from the v0.9.0 fork (tag `thai-forms-v0.9`). Areas A–E built on v0.14.0 (branch `thai`); area E from issue pichitc54/pdfcraft#1. Area F specified, not built yet.
 
 ## Principles
 
@@ -12,7 +12,7 @@ Status: written 2026-10-28 for the rebuild on v0.14.0, from the v0.9.0 fork (tag
    - ADR 0001: Thai field values are drawn in Sarabun, found at runtime first and embedded whole as a real TrueType font, so other viewers can redraw the field.
    - ADR 0002: Edit text may embed fonts installed on this Mac when their OS/2 `fsType` allows it.
 4. **Upstream's repo rules still apply**: never panic, quality gates, scoped builds. Its font rule (only open-licensed fonts from craft-fonts may enter a PDF) does not (ADRs 0001, 0002).
-5. **Each area ships on its own**, in the order A → B → C → D → E.
+5. **Each area ships on its own**, in the order A → B → C → D → E → F.
 
 ## Rebuild playbook
 
@@ -148,6 +148,29 @@ Full user stories, decisions and test seams: issue pichitc54/pdfcraft#1. Upstrea
 Test seams: the engine's set-field-value edit / form-fill tool (what lands in the PDF) and the UI harness (editor and panel behaviour).
 
 Last seen in (v0.14.0): `forms/src/rich.rs` (model, `/RV` reader and writer), `forms/src/lib.rs` (`Field::rich`, `allows_rich`, `FieldValue::Rich` in `write_value`), `forms/src/rich_appearance.rs` (a child module of the appearance code: pens, layout, `prepare`/`draw`), `automation/src/forms.rs` (`{"rich": …}` in form_fill, `rich` in form_fields), `ui-egui/src/rich_field_ui.rs` (the editor's per-character styles, layouter, panel mapping), `ui-egui/src/forms_ui.rs` (`Focus::rich`, ⌘B/⌘I/⌘U, `rich_panel`), `ui-egui/src/format_text_ui.rs` (`FieldFormat`: strikethrough, superscript, subscript, more families), `ui-egui/src/commands.rs` (⌘B/⌘I/⌘U left to a rich field: upstream binds ⌘B to New bookmark). Tests: `forms/src/rich_tests.rs`, `automation/tests/it/rich_form_fill.rs`, `engine/tests/it/thai_forms.rs`, `ui-egui/tests/it/rich_fields.rs`.
+
+## F. Movable dialogs and floating panels
+
+Not Thai-specific, but part of the fork so every rebuild carries it. Upstream (v0.14.0) centres every **dialog** with a fixed position and pins the Format text panel beside the field.
+
+### Rules
+
+- **What moves**: every **dialog** (the shared modal card: Field Properties, Bulk field properties, Print, Preferences, Comment/Link properties, Redact, Protect, save and link prompts, and the rest) and the **floating panel** (Format text beside a rich-text field). Popups attached to a control (menus, colour swatches, date picker, choice list), the comment composer and toasts stay put. Windows that are already movable (Text Field Table) stay as they are.
+- **Handle**: drag from any empty part of the card. Pressing a control (text box, button, slider, list) works as before; no title bar or grip is added.
+- **Still modal**: a dialog keeps its dim backdrop and keeps blocking the page; only its position changes.
+- **Remembered for the session**: each dialog kind reopens where it was last left (Field Properties where Field Properties was), centred until first moved; nothing is saved to disk, so a restart re-centres. The floating panel follows its field until dragged, then stays at that screen position, also for later rich-text fields, until the app quits.
+- **On screen**: the whole card stays inside the app window; dragging stops at the edge, and a card left outside after the window shrinks moves back in. A card taller than the window keeps its top edge visible.
+- **Dragging the floating panel doesn't end the edit**: the rich-text field keeps its focus and selection, and the panel keeps applying to it.
+
+### Acceptance examples
+
+- Field Properties dragged left by 200 points shows the field it edits; closing and reopening it opens at the dragged spot; Print still opens centred.
+- Dragging a text box inside Field Properties selects text instead of moving the dialog.
+- Dragging Field Properties past the window's right edge stops with the card fully inside.
+- While filling a rich-text field, dragging the Format text panel away and then clicking Bold makes the selected words bold; the field stays in the fill editor.
+- After the panel was dragged, opening another rich-text field shows the panel at the dragged spot.
+
+Test seam: the UI harness (kittest pointer drags, as `ui-egui/tests/it/rich_fields.rs` already does for the panel).
 
 ## Out of scope
 

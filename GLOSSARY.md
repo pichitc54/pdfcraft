@@ -56,3 +56,11 @@ _Avoid_: character slot
 
 **Shaping**:
 Turning a run of Thai characters into positioned glyphs, so stacked marks, descender-less consonants and สระอำ come out right.
+
+**Dialog**:
+A modal card (Field Properties, Print, Preferences, prompts) that blocks the page until it is closed. It can be dragged by any empty part of the card.
+_Avoid_: popup, window, modal (in prose)
+
+**Floating panel**:
+A non-modal card that stays open beside what it acts on while you keep working in it: the Format text panel beside a rich-text field being filled.
+_Avoid_: popup, palette, sidebar (the docked panels)
