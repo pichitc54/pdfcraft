@@ -108,6 +108,11 @@ fn editable_combo(f: &FormField) -> bool {
 /// option it picks (a free value typed into an editable one has no option, and shows as is).
 pub(crate) fn draft_text(f: &FormField) -> String {
     let value = f.value.first().cloned().unwrap_or_default();
+    // Acrobat separates a multiline value's lines with carriage returns, which the editor
+    // doesn't break on: it edits them as line feeds (compared loosely in `draft_edit`).
+    if f.kind == FormFieldKind::Text && f.has(field_flags::MULTILINE) {
+        return pdfcraft_engine::form_rich::normalize_breaks(&value);
+    }
     if f.kind == FormFieldKind::Combo
         && let Some((_, shown)) = f.options.iter().find(|(export, _)| *export == value)
     {
@@ -307,7 +312,7 @@ pub(crate) fn draft_edit(focus: &Focus, form: &[FormField]) -> Option<Edit> {
             let mut draft = focus.rich.clone()?;
             draft.sync(&focus.text);
             let rv = draft.value();
-            let text_changed = f.value.first().map(String::as_str).unwrap_or("") != focus.text;
+            let text_changed = !same_text(f, &focus.text);
             let had = f.rich_value();
             if draft.is_plain() && had.is_none() {
                 if !text_changed {
@@ -320,7 +325,7 @@ pub(crate) fn draft_edit(focus: &Focus, form: &[FormField]) -> Option<Edit> {
                 return None;
             }
         }
-        FormFieldKind::Text if f.value.first().map(String::as_str).unwrap_or("") != focus.text => FieldValue::Text(focus.text.clone()),
+        FormFieldKind::Text if !same_text(f, &focus.text) => FieldValue::Text(focus.text.clone()),
         // Typed into an editable combo box: a shown text picks its option, anything else is the
         // value itself (the engine maps it, and refuses free text when Edit is clear).
         FormFieldKind::Combo if editable_combo(f) && focus.text != draft_text(f) && f.value.first() != Some(&focus.text) => {
@@ -329,6 +334,13 @@ pub(crate) fn draft_edit(focus: &Focus, form: &[FormField]) -> Option<Edit> {
         _ => return None,
     };
     Some(Edit::SetFieldValue { name: f.name.clone(), value })
+}
+
+/// Whether `text` is the text field's value, its line breaks compared loosely (`\r`, `\r\n`
+/// and `\n` are one break), so opening and leaving a field changes nothing.
+fn same_text(f: &FormField, text: &str) -> bool {
+    let value = f.value.first().map(String::as_str).unwrap_or("");
+    value == text || pdfcraft_engine::form_rich::normalize_breaks(value) == pdfcraft_engine::form_rich::normalize_breaks(text)
 }
 
 /// Close the focused field's editor, queueing the edit for its draft if it differs from the
