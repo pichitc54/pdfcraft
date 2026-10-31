@@ -10,7 +10,8 @@
 //! Helvetica font with WinAnsi encoding; line breaking uses [`text_width`], an approximation of
 //! Helvetica's proportions by character class (no font program or metrics file is bundled).
 
-use pdfcraft_cos::{Dict, Object, PdfString, Stream};
+use pdfcraft_cos::{Dict, ObjRef, Object, PdfString, Stream};
+use pdfcraft_fonts::thai::{self, ShapedRun, ThaiFace};
 use pdfcraft_fonts::{first_undrawable, literal, win_ansi};
 pub use pdfcraft_fonts::{helvetica_width as text_width, wrap};
 
@@ -311,6 +312,10 @@ fn text_turn(d: &Dict) -> i64 {
 /// dynamic stamp's "By …" line, and a redaction mark's overlay text (drawn when it is applied). `None` when all of
 /// it can be drawn.
 pub fn undrawable_text(d: &Dict) -> Option<(&'static str, char)> {
+    // Drawn in the Thai document face instead (see `thai_face_for`).
+    if thai_face_for(d).is_some() {
+        return None;
+    }
     let text = |key: &[u8]| d.get(key).and_then(Object::as_string).map(PdfString::to_text);
     let (what, text) = match d.name(b"Subtype")? {
         b"FreeText" => ("the comment's text", text(b"Contents")?),
@@ -322,6 +327,26 @@ pub fn undrawable_text(d: &Dict) -> Option<(&'static str, char)> {
         _ => return None,
     };
     Some((what, first_undrawable(&text)?))
+}
+
+/// The Thai document face (Sarabun) a text box, callout or Fill & Sign text is drawn with instead
+/// of the standard fonts: when the app installed one, the standard fonts can't draw the text, and
+/// the face covers all of it.
+pub(crate) fn thai_face_for(d: &Dict) -> Option<&'static ThaiFace> {
+    if d.name(b"Subtype") != Some(b"FreeText") {
+        return None;
+    }
+    let text = d.get(b"Contents").and_then(Object::as_string).map(PdfString::to_text)?;
+    first_undrawable(&text)?;
+    let face = &thai::installed_document_faces()?.regular;
+    thai::covers(face, &text).then_some(face)
+}
+
+/// The embedded Thai font a text box is drawn with: its resource name, font and face.
+pub(crate) struct ThaiText<'a> {
+    pub name: String,
+    pub font: ObjRef,
+    pub face: &'a ThaiFace,
 }
 
 /// `/Font` resources naming `/Helv`: standard Helvetica with WinAnsiEncoding.
@@ -406,13 +431,19 @@ impl AppearanceDrawing {
 /// Text the standard fonts can't draw comes out as `?`: [`undrawable_text`] says which, and
 /// [`crate::set_appearance`] marks the annotation with it (`pdfcraft_fonts::UNDRAWN_MARK`).
 pub fn build(d: &Dict) -> Option<Stream> {
+    build_with(d, None, &mut Vec::new())
+}
+
+/// [`build`], drawing a text box's text with `thai` when given; the shaped runs drawn go into
+/// `shown`, for the font's ToUnicode.
+pub(crate) fn build_with(d: &Dict, thai: Option<&ThaiText>, shown: &mut Vec<(ShapedRun, String)>) -> Option<Stream> {
     let context = appearance_context(d)?;
     let drawing = AppearanceDrawing::new(&context);
     match context.subtype {
         b"Text" => return draw_icon(&context, "Note", [1.0, 0.82, 0.0], drawing),
         b"FileAttachment" => return draw_icon(&context, "PushPin", [0.0, 0.47, 0.84], drawing),
         b"Stamp" => return draw_stamp(&context, drawing),
-        b"FreeText" => return draw_free_text(&context, drawing),
+        b"FreeText" => return draw_free_text(&context, drawing, thai, shown),
         _ => {}
     }
     let mut drawing = drawing;
@@ -889,7 +920,12 @@ fn draw_stamp(context: &AppearanceContext<'_>, mut drawing: AppearanceDrawing) -
     Some(form(rect, c.as_bytes(), res))
 }
 
-fn draw_free_text(context: &AppearanceContext<'_>, mut drawing: AppearanceDrawing) -> Option<Stream> {
+fn draw_free_text(
+    context: &AppearanceContext<'_>,
+    mut drawing: AppearanceDrawing,
+    thai: Option<&ThaiText>,
+    shown: &mut Vec<(ShapedRun, String)>,
+) -> Option<Stream> {
     let d = context.dict;
     let rect = context.rect;
     let stroke = context.stroke;
@@ -964,34 +1000,61 @@ fn draw_free_text(context: &AppearanceContext<'_>, mut drawing: AppearanceDrawin
     let pad = 2.0 + bw;
     let width = (rect[2] - rect[0] - 2.0 * pad).max(1.0);
     let q = d.int(b"Q").unwrap_or(0);
+    // The Thai face: its own ascent for the first baseline and its full height as leading, as
+    // Thai stacks marks above and below.
+    let metrics = thai.and_then(|t| thai::vertical_metrics(t.face));
+    let (first, leading) = metrics.map_or((0.9, 1.2), |(a, d)| (a, (a - d).max(1.2)));
+    let font_name = thai.map_or("Helv", |t| t.name.as_str());
     c.push_str(&format!(
-        "{} {} {} {} re W n\nBT\n/Helv {} Tf\n{}",
+        "{} {} {} {} re W n\nBT\n/{} {} Tf\n{}",
         n(rect[0]),
         n(rect[1]),
         n(rect[2] - rect[0]),
         n(rect[3] - rect[1]),
+        font_name,
         n(size),
         rg(text_color)
     ));
     let mut out = c.into_bytes();
-    let mut y = rect[3] - pad - size * 0.9;
-    for line in wrap(&text, size, width) {
+    let mut y = rect[3] - pad - size * first;
+    let lines = match thai {
+        Some(t) => thai::wrap(t.face, &text, size, width),
+        None => wrap(&text, size, width),
+    };
+    for line in lines {
         if y < rect[1] - size {
             break;
         }
-        let lw = text_width(&line, size);
+        let run = thai.and_then(|t| thai::shape(t.face, &line).ok());
+        let lw = run.as_ref().map_or_else(|| text_width(&line, size), |r| r.glyphs.iter().map(|g| g.advance).sum::<f64>() * size);
         let x = match q {
             1 => rect[0] + pad + (width - lw) / 2.0,
             2 => rect[2] - pad - lw,
             _ => rect[0] + pad,
         };
-        out.extend(format!("1 0 0 1 {} {} Tm ", n(x), n(y)).bytes());
-        out.extend(literal(&win_ansi(&line)));
-        out.extend_from_slice(b" Tj\n");
-        y -= size * 1.2;
+        match run {
+            Some(run) => {
+                out.extend(format!("1 0 0 1 {} {} Tm\n", n(x), n(y)).bytes());
+                out.extend(thai::show(&run, &line, size));
+                shown.push((run, line));
+            }
+            None => {
+                out.extend(format!("1 0 0 1 {} {} Tm ", n(x), n(y)).bytes());
+                out.extend(literal(&win_ansi(&line)));
+                out.extend_from_slice(b" Tj\n");
+            }
+        }
+        y -= size * leading;
     }
     out.extend_from_slice(b"ET\n");
-    res.set(b"Font".to_vec(), helvetica_resource());
+    match thai {
+        Some(t) => {
+            let mut fonts = Dict::new();
+            fonts.set(t.name.as_bytes().to_vec(), Object::Ref(t.font));
+            res.set(b"Font".to_vec(), Object::Dict(fonts));
+        }
+        None => res.set(b"Font".to_vec(), helvetica_resource()),
+    }
     let mut stream = form(full, &out, res);
     if let Some(m) = matrix {
         stream.dict.set(b"Matrix".to_vec(), Object::Array(m.iter().copied().map(Object::Real).collect()));

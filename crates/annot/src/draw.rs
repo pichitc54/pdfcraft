@@ -33,8 +33,36 @@ pub(crate) fn redraw_or_restore(doc: &mut Document, r: ObjRef, before: Dict) -> 
 pub(crate) fn draw_appearance(doc: &mut Document, r: ObjRef) -> Result<(), AnnotError> {
     let d = annot_dict(doc, r);
     let subtype = String::from_utf8_lossy(d.name(b"Subtype").unwrap_or_default()).into_owned();
+    // Text the standard fonts can't draw and the Thai document face can: drawn in that face.
+    if let Some(thai) = appearance::thai_face_for(&d).and_then(|face| thai_text(doc, face)) {
+        let mut shown = Vec::new();
+        let Some(stream) = appearance::build_with(&d, Some(&thai), &mut shown) else { return Err(AnnotError::Unsupported(subtype)) };
+        for (run, text) in shown {
+            let _ = pdfcraft_fonts::thai::add_unicode(doc, thai.font, &run, &text);
+        }
+        return apply_appearance(doc, r, &d, stream);
+    }
     let Some(stream) = build_appearance(doc, &d) else { return Err(AnnotError::Unsupported(subtype)) };
     apply_appearance(doc, r, &d, stream)
+}
+
+/// The catalog entry holding the Thai faces embedded for comments, so every text box shares one copy.
+const THAI_FONTS_KEY: &[u8] = b"PCThaiFonts";
+
+/// `face` embedded in `doc` for comments: the copy recorded in the catalog's `/PCThaiFonts`, else
+/// embedded now and recorded there. `None` if the face can't be embedded.
+fn thai_text<'a>(doc: &mut Document, face: &'a pdfcraft_fonts::thai::ThaiFace) -> Option<appearance::ThaiText<'a>> {
+    use pdfcraft_fonts::thai;
+    let root = doc.root()?;
+    let mut fonts = doc.get(root).as_dict().and_then(|c| c.get(THAI_FONTS_KEY).cloned()).and_then(|f| doc.dict(&f)).unwrap_or_default();
+    if let Some((name, font)) = thai::find_embedded(doc, &fonts, face) {
+        return Some(appearance::ThaiText { name: String::from_utf8_lossy(&name).into_owned(), font, face });
+    }
+    let font = thai::embed(doc, face).ok()?;
+    let name = doc.get(font).as_dict().and_then(|d| d.name(b"BaseFont").map(|n| String::from_utf8_lossy(n).into_owned()))?;
+    fonts.set(name.as_bytes().to_vec(), Object::Ref(font));
+    doc.update_dict(root, |c| c.set(THAI_FONTS_KEY.to_vec(), Object::Dict(fonts))).ok()?;
+    Some(appearance::ThaiText { name, font, face })
 }
 
 /// Draw the appearance for an annotation dictionary: the expensive half of [`set_appearance`].

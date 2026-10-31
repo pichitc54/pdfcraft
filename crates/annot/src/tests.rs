@@ -2194,3 +2194,6 @@ fn degenerate_and_absurd_leader_and_caption_values_do_not_panic() {
     assert!(long.contains(&format!("({}) Tj", "w".repeat(256))), "cut to 256");
     assert!(!long.contains(&"w".repeat(257)));
 }
+
+#[path = "thai_tests.rs"]
+mod thai;
