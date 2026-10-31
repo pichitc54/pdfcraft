@@ -177,6 +177,8 @@ impl PdfCraftApp {
                     self.notify(match &n {
                         pdfcraft_engine::EditNotice::Undrawn(t) => crate::content_ui::undrawn_message(t),
                         pdfcraft_engine::EditNotice::BackdropsLeftOff { pages } => crate::marks_ui::backdrops_left_off_message(pages),
+                        // An edited paragraph set in another font (Sarabun) than the text around it.
+                        pdfcraft_engine::EditNotice::Font(m) => m.clone(),
                     });
                 }
                 let out = self.session.take_js_output(id);

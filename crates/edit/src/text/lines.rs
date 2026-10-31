@@ -312,6 +312,13 @@ fn text_lines_in(doc: &Document, p: &pdfcraft_model::Page, actual_text: bool) ->
             l.runs.clear();
         }
     }
+    // Word stores สระอำ's nikhahit as a space: read "ก า" as "กำ" so edits write ำ back.
+    for l in &mut lines {
+        if let std::borrow::Cow::Owned(repaired) = pdfcraft_fonts::thai::repair_sara_am(&l.text) {
+            l.text = repaired;
+            l.runs.clear();
+        }
+    }
     // Lines of only spaces aren't editable text.
     lines.retain(|l| !l.text.trim().is_empty());
     Ok(lines)

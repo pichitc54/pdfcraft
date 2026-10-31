@@ -93,9 +93,13 @@ pub use pdfcraft_forms::{
     appearance::comb_auto_text_size as field_comb_auto_text_size, calculations_changed as form_calculations_changed, clip_to_max_len, field_len, flags as field_flags,
 };
 
-/// Find and install the Thai document face (Sarabun) that filled form fields draw Thai with
-/// (ADR 0001); call once at start-up. Returns whether one was found.
+/// Find and install the Thai document face (Sarabun) that filled form fields and comments draw
+/// Thai with (ADR 0001), and the font folders Edit text searches for a complete copy of a PDF's
+/// subset font (ADR 0002); call once at start-up. Returns whether a Thai face was found.
 pub fn install_thai_faces() -> bool {
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let env = std::env::var_os(pdfcraft_fonts::thai::DIR_VAR);
+    pdfcraft_fonts::installed::install_font_dirs(pdfcraft_fonts::installed::search_dirs(env.as_deref(), home.as_deref()));
     match pdfcraft_fonts::thai::install_from_environment() {
         Some(faces) => {
             log::info!("Thai document font: {} ({:?})", faces.regular.family, faces.regular.source);

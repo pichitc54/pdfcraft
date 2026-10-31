@@ -17,6 +17,8 @@ pdfcraft-model = { workspace = true }
 thiserror = { workspace = true }
 # A backdrop copy's tag records a hash of the operators before the fill it turned off (backdrop.rs).
 sha2 = "0.11"
+# Grapheme clusters: Thai rows may change font only between clusters; already in the tree via egui.
+unicode-segmentation = "1"
 kurbo = { workspace = true }
 # Display order of right-to-left lines in added text, and reading and writing order in Edit text;
 # already in the tree via the interface.

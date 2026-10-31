@@ -8576,3 +8576,6 @@ fn styled_existing_justification_is_refused_instead_of_silently_left_aligning() 
     assert_eq!(page_content_bytes(&doc, 0), before);
     assert_eq!(page_content_bytes(&reopen(&doc), 0), before);
 }
+
+#[path = "thai_tests.rs"]
+mod thai;

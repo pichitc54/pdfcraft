@@ -156,6 +156,9 @@ pub(crate) fn check_permission(edit: &Edit, p: &pdfcraft_cos::Permissions) -> Re
 
 /// Dates and unique ids stamped onto what an edit creates.
 pub(crate) struct EditCtx {
+    /// Why an edit looks different from the text around it (a paragraph set in Sarabun because
+    /// its font isn't installed), for the interface to show.
+    pub(crate) font_notices: Vec<String>,
     /// Field scripts run (`None`: JavaScript is off) and what they produced.
     pub(crate) js: Option<js::JsRunner>,
     /// A laid-out XFA form's template (`None`: not an XFA form, or JavaScript is off) and what
@@ -214,6 +217,7 @@ impl EditCtx {
             rng: getrandom::fill,
             renamed_fields: Vec::new(),
             redaction_overlays: Vec::new(),
+            font_notices: Vec::new(),
         }
     }
 
@@ -561,7 +565,8 @@ pub(crate) fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut E
         }
         Edit::MoveObjects { page, objects, offset } => pdfcraft_edit::move_objects(doc, *page, objects, *offset)?,
         Edit::EditTextBlock { page, block, text, style } => {
-            pdfcraft_edit::rewrite_block(doc, *page, *block, Some(text), style)?;
+            let edit = pdfcraft_edit::rewrite_block(doc, *page, *block, Some(text), style)?;
+            cx.font_notices.extend(edit.notice);
         }
         Edit::RegisterTextFont { page, bytes } => {
             pdfcraft_edit::text::register_text_font(doc, *page, bytes)?;

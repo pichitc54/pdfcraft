@@ -60,6 +60,7 @@ impl Session {
         }
         cx.renamed_fields.clear();
         cx.redaction_overlays.clear();
+        cx.font_notices.clear();
         // `next` is a copy: if the edit fails or crashes, the document is unchanged.
         guard(|| run_edit(&mut next, &edit, &mut cx))
             .unwrap_or_else(|m| Err(EditError::Invalid(format!("{} failed unexpectedly ({m}); the document was not changed", edit.label()))))?;
@@ -167,7 +168,8 @@ impl Session {
         if signed && ((rewrites(&next) && !rewrites(&editor.cos)) || (next.is_modified() && next.revisions().is_empty())) {
             return Err(EditError::SignedRewrite(edit.label().to_string()));
         }
-        let notices = edit_notices(&edit, &editor.cos, &next);
+        let mut notices = edit_notices(&edit, &editor.cos, &next);
+        notices.extend(cx.font_notices.drain(..).map(EditNotice::Font));
         let previous = std::mem::replace(&mut editor.cos, next);
         let keys = keys_after(&edit).unwrap_or_else(|| editor.keys.clone());
         let previous_keys = std::mem::replace(&mut editor.keys, keys);
