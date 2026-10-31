@@ -22,6 +22,7 @@ pub mod appearance;
 mod author;
 mod calc_order;
 pub mod detect;
+pub mod rich;
 mod scripting;
 pub mod table;
 pub use actions::{FieldAction, Trigger, field_action_chains, field_actions, set_field_actions};
@@ -169,9 +170,23 @@ pub struct Field {
     pub actions: af::Actions,
     /// Push buttons: what a click does.
     pub button: Option<af::ButtonAction>,
+    /// Text fields that allow rich text formatting: the rich value (`/RV`), when it reads. It
+    /// describes the value only while it shows the same text ([`rich::RichValue::shows`]).
+    pub rich: Option<rich::RichValue>,
 }
 
 impl Field {
+    /// Whether the field takes a rich value: a text field that allows rich text formatting and
+    /// is neither a comb nor a password field (docs/thai-forms-spec.md area E).
+    pub fn allows_rich(&self) -> bool {
+        self.kind == FieldKind::Text && self.has(flags::RICH_TEXT) && !self.has(flags::COMB) && !self.has(flags::PASSWORD)
+    }
+
+    /// The rich value, when the field takes one and it shows the current value.
+    pub fn rich_value(&self) -> Option<&rich::RichValue> {
+        self.rich.as_ref().filter(|r| self.allows_rich() && r.shows(&self.value.first().cloned().unwrap_or_default()))
+    }
+
     pub fn has(&self, flag: u32) -> bool {
         self.flags & flag != 0
     }
@@ -253,6 +268,9 @@ pub enum FieldValue {
     Radio(Option<String>),
     /// Combo box or list box: export values (several only for multi-select lists).
     Choice(Vec<String>),
+    /// Text field that allows rich text formatting: the formatted value. Its plain text becomes
+    /// `/V`; a field that doesn't take rich values gets only that.
+    Rich(rich::RichValue),
 }
 
 // ── reading ─────────────────────────────────────────────────────────────────────────────────

@@ -5488,3 +5488,6 @@ fn locked_button_export_edits_leave_the_document_unchanged() {
 
 #[path = "thai_tests.rs"]
 mod thai;
+
+#[path = "rich_tests.rs"]
+mod rich;

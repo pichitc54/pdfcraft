@@ -198,9 +198,31 @@ pub fn calculations_changed(before: &[Field], after: &[Field]) -> Vec<String> {
         .collect()
 }
 
+/// A default style string (`/DS`, §12.7.4.3) from a `/DA`: its font size and colour, Helvetica.
+fn default_style(da: &str) -> String {
+    let da = appearance::parse_da(da);
+    let size = if da.size > 0.0 { da.size } else { 12.0 };
+    let toks: Vec<f64> = da.color.split_whitespace().filter_map(|t| t.parse().ok()).collect();
+    let rgb = match toks.as_slice() {
+        [g] => [*g; 3],
+        [r, g, b] => [*r, *g, *b],
+        [c, m, y, k] => [(1.0 - c) * (1.0 - k), (1.0 - m) * (1.0 - k), (1.0 - y) * (1.0 - k)],
+        _ => [0.0; 3],
+    };
+    let c = |v: f64| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    format!("font: Helvetica {}pt; color:#{:02x}{:02x}{:02x}", appearance::fmt(size), c(rgb[0]), c(rgb[1]), c(rgb[2]))
+}
+
 pub(crate) fn write_value(doc: &mut Document, f: &Field, value: &FieldValue, scripts: &mut dyn Scripts) -> Result<(), FormError> {
     match (f.kind, value) {
-        (FieldKind::Text, FieldValue::Text(t)) => {
+        (FieldKind::Text, FieldValue::Text(_) | FieldValue::Rich(_)) => {
+            // A rich value only where the field takes one; elsewhere its plain text.
+            let (plain, rich) = match value {
+                FieldValue::Rich(r) => (r.plain_text(), f.allows_rich().then_some(r)),
+                FieldValue::Text(t) => (t.clone(), None),
+                _ => return invalid(format!("{:?} is a text field", f.name)),
+            };
+            let t = &plain;
             if let Some(max) = f.max_len
                 && field_len(t) > max
             {
@@ -211,13 +233,26 @@ pub(crate) fn write_value(doc: &mut Document, f: &Field, value: &FieldValue, scr
             af::validate(&f.actions.validate, t).map_err(FormError::Invalid)?;
             let t = &scripting::accept(doc, f, t, scripts)?;
             let shadow = t.is_empty() && crate::author::ancestor_sets(doc, f.obj, b"V");
+            // A script that changed the text leaves it plain: formatting can't follow it.
+            let rv = rich.filter(|r| r.shows(t)).map(|r| r.clone().normalized().to_xhtml());
+            let ds = rv.as_ref().map(|_| default_style(&f.da));
             doc.update_dict(f.obj, |d| {
                 if t.is_empty() && !shadow {
                     d.remove(b"V");
                 } else {
                     d.set(b"V".to_vec(), PdfString::text(t));
                 }
-                d.remove(b"RV");
+                match &rv {
+                    Some(rv) if !t.is_empty() => {
+                        d.set(b"RV".to_vec(), PdfString::text(rv));
+                        if !d.contains(b"DS") {
+                            d.set(b"DS".to_vec(), PdfString::text(ds.as_deref().unwrap_or_default()));
+                        }
+                    }
+                    _ => {
+                        d.remove(b"RV");
+                    }
+                }
             })?;
             redraw(doc, f, std::slice::from_ref(t), scripts)
         }
@@ -237,7 +272,7 @@ pub(crate) fn write_value(doc: &mut Document, f: &Field, value: &FieldValue, scr
                     }
                 }
                 FieldValue::Radio(None) => false,
-                FieldValue::Choice(_) => return invalid(format!("{:?} is a check box: use true or false", f.name)),
+                FieldValue::Choice(_) | FieldValue::Rich(_) => return invalid(format!("{:?} is a check box: use true or false", f.name)),
             };
             set_states(doc, f, on.then_some(state.as_str()))
         }
