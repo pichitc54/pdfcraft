@@ -156,6 +156,7 @@ use tools::link_ui;
 use tools::measure_ui;
 use tools::object_ui;
 pub use tools::prepare;
+pub use tools::rich_field_ui;
 use tools::redact_ui;
 use tools::sign_ui;
 use tools::stamps_ui;

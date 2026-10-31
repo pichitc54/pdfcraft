@@ -47,6 +47,10 @@ pub struct Focus {
     /// Whether the text box had the keyboard at the end of the editor's last frame
     /// ([`crate::edit_text_ui::lost_focus_once`]).
     pub(crate) had_focus: bool,
+    /// Text fields that allow rich text formatting: the style of every character typed.
+    pub rich: Option<crate::rich_field_ui::RichDraft>,
+    /// Where the Format text panel of a rich text field was drawn: clicks there keep it open.
+    pub panel_rect: Option<egui::Rect>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -126,6 +130,8 @@ fn open_focus(f: &FormField, widget: usize) -> Focus {
         calendar_rect: None,
         calendar_text: None,
         had_focus: false,
+        rich: f.allows_rich().then(|| crate::rich_field_ui::RichDraft::of(f)),
+        panel_rect: None,
     }
 }
 
@@ -295,6 +301,24 @@ pub(crate) fn page_input(cx: PageToolContext<'_>, form: &[FormField], allowed: b
 pub(crate) fn draft_edit(focus: &Focus, form: &[FormField]) -> Option<Edit> {
     let f = form.iter().find(|f| f.name == focus.name)?;
     let value = match f.kind {
+        // A rich text field: its formatting too, as a rich value (plain when nothing is formatted).
+        FormFieldKind::Text if focus.rich.is_some() => {
+            let mut draft = focus.rich.clone()?;
+            draft.sync(&focus.text);
+            let rv = draft.value();
+            let text_changed = f.value.first().map(String::as_str).unwrap_or("") != focus.text;
+            let had = f.rich_value();
+            if draft.is_plain() && had.is_none() {
+                if !text_changed {
+                    return None;
+                }
+                FieldValue::Text(focus.text.clone())
+            } else if text_changed || had != Some(&rv) {
+                if draft.is_plain() { FieldValue::Text(focus.text.clone()) } else { FieldValue::Rich(rv) }
+            } else {
+                return None;
+            }
+        }
         FormFieldKind::Text if f.value.first().map(String::as_str).unwrap_or("") != focus.text => FieldValue::Text(focus.text.clone()),
         // Typed into an editable combo box: a shown text picks its option, anything else is the
         // value itself (the engine maps it, and refuses free text when Edit is clear).
@@ -698,6 +722,9 @@ fn settle_text_editor(
         let clipped = pdfcraft_engine::clip_to_max_len(&fx.text, max).len();
         fx.text.truncate(clipped);
     }
+    if let Some(draft) = fx.rich.as_mut() {
+        draft.sync(&fx.text);
+    }
     if let Some(press) = fx.press.take()
         && let Some((galley, pos)) = laid_out
         && let Some(mut st) = egui::TextEdit::load_state(ui.ctx(), r.id)
@@ -834,6 +861,22 @@ pub(crate) fn overlay(
                     let font = field_screen_font(ui.painter(), f, w, &fx.text, zoom);
                     // The field is pale yellow in every theme, so the caret must not follow the theme (pale in dark mode) (#655).
                     ui.visuals_mut().text_cursor.stroke.color = crate::edit_text_ui::caret_color_on(FIELD_FILL);
+                    // A rich text field: ⌘B, ⌘I and ⌘U toggle the selection's style (area E).
+                    let field_id = egui::Id::unique(("form-field", view.id.0, &f.name, focus.widget));
+                    let rich_look = crate::rich_field_ui::FieldLook::of(f, f64::from(font / zoom.max(1e-3)));
+                    if let Some(draft) = fx.rich.as_mut() {
+                        let range = selection(ui.ctx(), field_id, &fx.text);
+                        for (key, what) in [
+                            (egui::Key::B, crate::rich_field_ui::Toggle::Bold),
+                            (egui::Key::I, crate::rich_field_ui::Toggle::Italic),
+                            (egui::Key::U, crate::rich_field_ui::Toggle::Underline),
+                        ] {
+                            if ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, key)) {
+                                draft.toggle(&range, what, rich_look.bold, rich_look.italic);
+                            }
+                        }
+                    }
+                    let rich_draft = fx.rich.clone();
                     // A field that doesn't scroll takes no more than fits (ISO 32000-2 Table 228).
                     let before = text_box.map(|_| fx.text.clone());
                     let mut te = if multiline { egui::TextEdit::multiline(&mut fx.text) } else { egui::TextEdit::singleline(&mut fx.text) };
@@ -852,11 +895,19 @@ pub(crate) fn overlay(
                     let mut pitched = |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap: f32| {
                         ui.fonts_mut(|f| f.layout_job(pitched_job(text.as_str(), font, wrap)))
                     };
+                    // A rich value shows its runs' styles as it is typed.
+                    let mut styled = |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap: f32| {
+                        let mut draft = rich_draft.clone().unwrap_or_default();
+                        draft.sync(text.as_str());
+                        ui.fonts_mut(|f| f.layout_job(crate::rich_field_ui::job(&draft, text.as_str(), &rich_look, font, wrap)))
+                    };
                     if multiline {
                         te = te.desired_rows(((rect.height() / (font * LINE_PITCH)).floor() as usize).max(1));
-                        if !f.has(field_flags::PASSWORD) {
-                            te = te.layouter(&mut pitched);
-                        }
+                    }
+                    if rich_draft.is_some() {
+                        te = te.layouter(&mut styled);
+                    } else if multiline && !f.has(field_flags::PASSWORD) {
+                        te = te.layouter(&mut pitched);
                     }
                     let mut laid_out = None;
                     let r = ui
@@ -881,6 +932,13 @@ pub(crate) fn overlay(
                     } else if lost
                         && (!multiline || !enter)
                         && !fx.calendar_rect.is_some_and(|c| ui.input(|i| i.pointer.interact_pos().is_some_and(|p| c.contains(p))))
+                        // A press on a rich text field's Format text panel, or in its lists, keeps it open.
+                        && !(fx.rich.is_some()
+                            && !enter
+                            && (egui::Popup::is_any_open(ui.ctx())
+                                || fx.panel_rect.is_some_and(|c| {
+                                    ui.input(|i| (i.pointer.any_pressed() || i.pointer.any_down() || i.pointer.any_released()) && i.pointer.interact_pos().is_some_and(|p| c.contains(p)))
+                                })))
                     {
                         if pressed {
                             // The field reopened with a refused value; keep it open and focused.
@@ -891,6 +949,10 @@ pub(crate) fn overlay(
                         }
                     }
                 });
+            // Rich text fields: the Format text panel under the field, for its selection.
+            if view.forms.focus.as_ref().is_some_and(|fx| fx.rich.is_some()) {
+                rich_panel(ctx, view, f, focus.widget, rect, zoom);
+            }
             // Date fields: a calendar under the field (Acrobat's date picker).
             if let pdfcraft_engine::form_scripts::Format::Date(fmt) = &f.actions.format
                 && let Some(picked) = calendar(ctx, view, rect, fmt, today)
@@ -1048,5 +1110,88 @@ mod tests {
         assert_eq!(largest.get(), MAX_SCREEN_FONT, "laid out at the bound");
         assert_eq!(bounded_line_width(10.0, measure), 30.0, "below it, at the size itself");
         assert_eq!(largest.get(), MAX_SCREEN_FONT);
+    }
+}
+
+/// The editor's selection as a character range (a caret is empty), from its stored state; the
+/// end of the text when it has none yet.
+fn selection(ctx: &egui::Context, id: egui::Id, text: &str) -> std::ops::Range<usize> {
+    let len = text.chars().count();
+    egui::TextEdit::load_state(ctx, id).and_then(|s| s.cursor.char_range()).map_or(len..len, |r| {
+        let (a, b) = (usize::from(r.primary.index).min(len), usize::from(r.secondary.index).min(len));
+        a.min(b)..a.max(b)
+    })
+}
+
+/// The Format text panel for a rich text field's selection, under the field (above it when the
+/// window has no room below): what it changes applies to the selected characters, or to what is
+/// typed next at the caret.
+fn rich_panel(ctx: &egui::Context, view: &mut DocView, f: &FormField, widget: usize, rect: Rect, zoom: f32) {
+    use crate::format_text_ui::{FieldFormat, FontChoice, Fonts};
+    use crate::rich_field_ui::{FieldLook, PanelState};
+    let field_id = egui::Id::unique(("form-field", view.id.0, &f.name, widget));
+    let viewport = view.viewport_rect();
+    let Some(fx) = view.forms.focus.as_mut() else { return };
+    let Some(draft) = fx.rich.as_mut() else { return };
+    let range = selection(ctx, field_id, &fx.text);
+    let look = FieldLook::of(f, f64::from(field_text_size_pt(f, &fx.text, rect, zoom)));
+    let before = PanelState::of(&draft.style_of(&range), draft.align_of(&range), &look);
+    let mut state = PanelState::of(&draft.style_of(&range), draft.align_of(&range), &look);
+    const PANEL_W: f32 = 300.0;
+    const PANEL_H: f32 = 230.0;
+    let below = rect.bottom() + 6.0;
+    let y = if below + PANEL_H > viewport.bottom() { (rect.top() - 6.0 - PANEL_H).max(viewport.top()) } else { below };
+    let x = rect.left().min(viewport.right() - PANEL_W - 6.0).max(viewport.left());
+    let t = crate::theme::Tokens::get(ctx);
+    let mut font = None;
+    let mut changed = false;
+    let shown =
+        egui::Area::new(egui::Id::new(("form-rich-panel", view.id.0))).order(egui::Order::Foreground).fixed_pos(egui::pos2(x, y)).show(ctx, |ui| {
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                ui.set_width(PANEL_W);
+                let mut field = FieldFormat { strike: state.strike, vertical: state.vertical, families: crate::rich_field_ui::extra_families() };
+                let out = crate::format_text_ui::panel(
+                    ui,
+                    &t,
+                    &mut state.look,
+                    Some(&mut state.extras),
+                    Fonts { sources: None, shown: state.shown.clone() },
+                    None,
+                    Some(&mut field),
+                );
+                state.strike = field.strike;
+                state.vertical = field.vertical;
+                font = out.font;
+                changed = out.changed;
+            });
+        });
+    fx.panel_rect = Some(shown.response.rect);
+    let family = match font {
+        Some(FontChoice::Family(family)) => Some(family.label().to_string()),
+        Some(FontChoice::Named(name)) => Some(name),
+        _ => None,
+    };
+    if changed || family.is_some() {
+        state.apply(&before, family, draft, &range);
+        // A button or list on the panel gives the keyboard back to the field (its selection is
+        // kept); a number being typed into the panel keeps it there.
+        if ctx.memory(|m| m.focused()).is_none_or(|id| id == field_id) {
+            fx.request_focus = true;
+        }
+        ctx.request_repaint();
+    }
+}
+
+/// The size, in points, the field shows its text at (its `/DA` size, or the Auto size on screen).
+fn field_text_size_pt(f: &FormField, text: &str, rect: Rect, zoom: f32) -> f32 {
+    let toks: Vec<&str> = f.da.split_whitespace().collect();
+    let fixed = toks.iter().position(|t| *t == "Tf").and_then(|i| i.checked_sub(1)).and_then(|i| toks.get(i)).and_then(|s| s.parse::<f32>().ok());
+    match fixed.filter(|s| s.is_finite() && *s > 0.0) {
+        Some(s) => s,
+        // Auto size: about what fits the height, as the page appearance starts from.
+        None => {
+            let _ = text;
+            ((rect.height() / zoom.max(1e-3) - 6.0) / 1.15).clamp(4.0, 12.0)
+        }
     }
 }

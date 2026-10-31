@@ -794,6 +794,10 @@ impl PdfCraftApp {
         // Buttons also own keyboard focus for Tab/Enter activation, but they must not
         // suppress document shortcuts. Text editors retain their own undo/redo handling.
         let typing = ctx.text_edit_focused();
+        // A rich text field being filled takes ⌘B, ⌘I and ⌘U for bold, italic and underline
+        // (docs/thai-forms-spec.md area E), before New bookmark and the like.
+        let rich_typing =
+            self.active_ids().and_then(|(i, _)| self.views.get(i)).is_some_and(|v| v.forms.focus.as_ref().is_some_and(|f| f.rich.is_some()));
         let mut specs: Vec<&CommandSpec> = COMMANDS.iter().filter(|c| c.shortcut.is_some()).collect();
         specs.sort_by_key(|c| std::cmp::Reverse(c.shortcut.map(|s| s.modifier_count()).unwrap_or(0)));
         for spec in specs {
@@ -812,6 +816,9 @@ impl PdfCraftApp {
                 && !(spec.id == "edit.redo" && self.page_box_can_redo(ctx))
                 && !(spec.id == "edit.undo" && ctx.input(|i| i.modifiers.shift));
             if typing && !spec.in_text && !page_box {
+                continue;
+            }
+            if rich_typing && s.command && !s.shift && !s.mac_ctrl && matches!(s.key, "B" | "I" | "U") {
                 continue;
             }
             let Some(key) = Key::from_name(s.key) else { continue };
