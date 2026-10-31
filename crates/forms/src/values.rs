@@ -2,7 +2,7 @@ use super::appearances::{declares_pdfa, need_appearances};
 use super::read::{acroform, field_flags, fields, page_refs};
 use super::{
     Dict, Document, Field, FieldEvent, FieldKind, FieldValue, FormError, NoScripts, ObjRef, Object, PdfString, Scripts, Widget, af, appearance,
-    author, calc_order, flags, invalid, name_obj, scripting,
+    author, calc_order, field_len, flags, invalid, name_obj, scripting,
 };
 
 // ── writing ─────────────────────────────────────────────────────────────────────────────────
@@ -202,7 +202,7 @@ pub(crate) fn write_value(doc: &mut Document, f: &Field, value: &FieldValue, scr
     match (f.kind, value) {
         (FieldKind::Text, FieldValue::Text(t)) => {
             if let Some(max) = f.max_len
-                && t.chars().count() > max
+                && field_len(t) > max
             {
                 return invalid(format!("{:?} takes at most {max} characters", f.name));
             }
@@ -428,8 +428,8 @@ fn redraw(doc: &mut Document, f: &Field, values: &[String], scripts: &mut dyn Sc
     let mut undrawn = false;
     for w in &f.widgets {
         let (stream, missing) = match &shown {
-            Some(s) => appearance::field_appearance_drawn(doc, f, w, std::slice::from_ref(s), false),
-            None => appearance::field_appearance_drawn(doc, f, w, values, true),
+            Some(s) => appearance::field_appearance_written(doc, f, w, std::slice::from_ref(s), false),
+            None => appearance::field_appearance_written(doc, f, w, values, true),
         };
         undrawn |= missing.is_some();
         let existing_ap = in_place

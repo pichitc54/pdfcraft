@@ -64,6 +64,7 @@ impl PdfCraftApp {
 
     /// Construct an application with the default session, panels, theme and control state.
     pub fn new() -> Self {
+        pdfcraft_engine::install_thai_faces();
         Self {
             session: Session::new(),
             views: Vec::new(),

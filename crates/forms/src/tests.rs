@@ -5485,3 +5485,6 @@ fn locked_button_export_edits_leave_the_document_unchanged() {
         assert_eq!(write_incremental(&doc, &SaveOptions::default()).unwrap(), before);
     }
 }
+
+#[path = "thai_tests.rs"]
+mod thai;
