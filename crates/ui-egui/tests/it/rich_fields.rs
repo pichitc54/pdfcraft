@@ -118,6 +118,46 @@ fn the_format_panel_formats_the_selection_and_keeps_the_field_open() {
     assert_eq!(runs(&h, "city"), [("Lyon".to_string(), false, false, false, true)]);
 }
 
+fn panel(h: &Harness<'static, PdfCraftApp>) -> egui::Rect {
+    h.state().views[0].forms.focus.as_ref().and_then(|f| f.panel_rect).expect("the panel shows")
+}
+
+/// Press at `from`, move by `by` in a few steps, release.
+fn drag(h: &mut Harness<'static, PdfCraftApp>, from: egui::Pos2, by: egui::Vec2) {
+    h.hover_at(from);
+    h.run_steps(1);
+    h.drag_at(from);
+    h.run_steps(1);
+    for i in 1..=4 {
+        h.hover_at(from + by * (i as f32 / 4.0));
+        h.run_steps(1);
+    }
+    h.drop_at(from + by);
+    h.run_steps(3);
+}
+
+/// docs/thai-forms-spec.md area F: the panel moves off the lines it formats without ending the
+/// edit, and stays where it was left for the next rich text field.
+#[test]
+fn the_format_panel_drags_away_and_keeps_formatting_the_selection() {
+    let mut h = harness();
+    click_field(&mut h, "city");
+    type_text(&mut h, "Nice");
+    chord(&mut h, Key::A);
+    let before = panel(&h);
+    drag(&mut h, before.min + egui::vec2(3.0, 3.0), egui::vec2(260.0, -200.0));
+    let after = panel(&h);
+    assert!((after.min - (before.min + egui::vec2(260.0, -200.0))).length() < 1.5, "{before:?} -> {after:?}");
+    assert!(h.state().views[0].forms.focus.is_some(), "the field is still being filled");
+    chord(&mut h, Key::B);
+    h.key_press(Key::Enter);
+    h.run_steps(4);
+    assert_eq!(runs(&h, "city"), [("Nice".to_string(), true, false, false, false)]);
+    // The panel opens where it was left, not beside the field.
+    click_field(&mut h, "city");
+    assert!((panel(&h).min - after.min).length() < 1.5, "{after:?} -> {:?}", panel(&h));
+}
+
 #[test]
 fn an_ordinary_field_takes_no_formatting() {
     let mut h = harness();

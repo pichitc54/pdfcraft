@@ -122,7 +122,7 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
         app.custom_draft = Some((id, crate::CustomDraft { props: doc.custom_info(), ..Default::default() }));
     }
     let mut req = Pending::default();
-    let modal = widgets::show_modal(ctx, "dialog", |ui| {
+    let modal = widgets::show_placed_modal(ctx, "dialog", std::mem::discriminant(&dialog), |ui| {
         ui.set_width(match dialog {
             Dialog::Properties(_) => 640.0,
             Dialog::Print => 820.0,
