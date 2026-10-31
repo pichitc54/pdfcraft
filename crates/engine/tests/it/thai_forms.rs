@@ -205,3 +205,29 @@ fn thai_choices_are_drawn_in_sarabun() {
     assert_eq!(lines.iter().filter(|l| l.as_str() == "กรุงเทพฯ").count(), 2, "{lines:?}");
     assert!(lines.iter().any(|l| l == "เชียงใหม่"), "{lines:?}");
 }
+
+/// A rich value with a bold Thai word (area E), rendered and read back as a viewer does: the text
+/// in order, each style drawn, nothing as `?`.
+#[test]
+fn a_rich_thai_value_renders_and_reads_back() {
+    if sarabun("a_rich_thai_value_renders_and_reads_back").is_none() {
+        return;
+    }
+    use pdfcraft_forms::rich::{RichParagraph, RichValue, RunStyle, StyledRun};
+    let mut doc = one_page();
+    let rect = [72.0, 700.0, 372.0, 724.0];
+    let name = add_field(&mut doc, 0, rect, &NewField::Text { multiline: false }, None).unwrap();
+    set_props(&mut doc, &name, &FieldProps { flags: vec![(flags::RICH_TEXT, true)], font_size: Some(12.0), ..Default::default() }).unwrap();
+    let run = |t: &str, bold| StyledRun { text: t.into(), style: RunStyle { bold, ..Default::default() } };
+    let rv = RichValue {
+        paragraphs: vec![RichParagraph {
+            runs: vec![run("ชื่อ: ", None), run("สมชาย", Some(true)), run(" ใจดี", None)], ..Default::default()
+        }],
+    };
+    set_value(&mut doc, &name, &FieldValue::Rich(rv)).unwrap();
+    let doc = reopen(&doc);
+    let text = page_text(&doc);
+    assert!(text.contains("ชื่อ:") && text.contains("สมชาย") && text.contains("ใจดี"), "{text:?}");
+    assert!(ink(&doc, rect).iter().filter(|&&v| v > 128).count() > 200, "it is drawn");
+    assert!(appearance_font(&doc, &name).starts_with("Sarabun"));
+}
