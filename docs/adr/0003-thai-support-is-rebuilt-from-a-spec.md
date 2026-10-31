@@ -1,6 +1,6 @@
 # Thai support is rebuilt on a new upstream release from a behaviour spec, not merged forward
 
-From v0.14.0 on, Thai form support is rebuilt on a branch cut from an upstream release tag, following `docs/thai-forms-spec.md`, instead of merging each release into the long-lived `thai-forms` branch. The spec states behaviour and acceptance examples, not code, so it outlives any one upstream layout; where upstream already has a mechanism that meets a criterion (shaping, line breaking, its craft-fonts Thai face, its interface Thai font) the rebuild uses it, and only the deliberate departures in ADR 0001 and ADR 0002 are fork code. The v0.9.0 fork stays as tag `thai-forms-v0.9` for reference.
+From v0.14.0 on, Thai form support is rebuilt on a branch cut from an upstream release tag, following `docs/thai-forms-spec.md`, instead of merging each release into the long-lived `thai-forms` branch. The spec states behaviour and acceptance examples, not code, so it outlives any one upstream layout; where upstream already has a mechanism that meets a criterion (shaping, line breaking, its craft-fonts Thai face, its interface Thai font) the rebuild uses it, and only the deliberate departures in ADR 0001 and ADR 0002 are fork code. The v0.9.0 fork was kept as tag `thai-forms-v0.9` until 2026-10-31 (commit b9b3ccd); each rebuild keeps the previous one as a tag (`thai-v0.14`).
 
 ## Considered Options
 
