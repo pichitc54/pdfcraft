@@ -3104,6 +3104,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "icu_segmenter"
+version = "2.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "82d07aafccd67af15d02512a6adf5896fbc5ed00f2e99b471d2efa14016db3db"
+dependencies = [
+ "icu_collections",
+ "icu_locale_fallback",
+ "icu_provider",
+ "icu_segmenter_data",
+ "potential_utf",
+ "smallvec",
+ "utf8_iter",
+ "zerovec",
+]
+
+[[package]]
+name = "icu_segmenter_data"
+version = "2.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ae293c039020f9ec10710af98d29ce6aa2051486638b49c9a6409f3b4a9e98ad"
+
+[[package]]
 name = "idna"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4376,6 +4398,7 @@ dependencies = [
  "sha2 0.11.1",
  "thiserror 2.0.21",
  "unicode-bidi",
+ "unicode-segmentation",
 ]
 
 [[package]]
@@ -4388,6 +4411,7 @@ dependencies = [
  "icu_properties",
  "idna",
  "image",
+ "log",
  "pdfcraft-a11y",
  "pdfcraft-annot",
  "pdfcraft-audit",
@@ -4445,9 +4469,11 @@ name = "pdfcraft-fonts"
 version = "0.16.1"
 dependencies = [
  "harfrust",
+ "icu_segmenter",
  "pdfcraft-cos",
  "skrifa 0.44.0",
  "unicode-bidi",
+ "unicode-segmentation",
 ]
 
 [[package]]
@@ -4461,6 +4487,7 @@ dependencies = [
  "pdfcraft-model",
  "proptest",
  "thiserror 2.0.21",
+ "unicode-segmentation",
 ]
 
 [[package]]
@@ -6765,7 +6792,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.5",
  "windows-sys 0.61.2",

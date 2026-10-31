@@ -21,6 +21,7 @@ Status: written 2026-10-28 for the rebuild on v0.14.0, from the v0.9.0 fork (tag
 3. craft-fonts: merge `origin/main` into the local `thai` branch. It adds Sarabun (Regular, Bold, Italic, Bold Italic, OFL) and lists Sarabun **before** Noto Sans Thai in the manifest, so Sarabun is the built-in fallback and the face upstream takes first. Build with `CRAFT_FONTS_DIR` set to its **absolute** path (build.rs runs in the crate's folder, so a relative path silently builds without craft-fonts).
 4. For each area: read upstream's code for that feature, list what it already does against the acceptance examples, and build only the rest. Commit as `Thai forms N: <behaviour>`.
 5. Before the first build, record upstream's own test failures on the plain tag (`cargo test -p <crate>`); only failures that don't happen there count against the rebuild.
+   Upstream tests that use Thai as an example of text no font can draw must change to a script the fork doesn't draw: `ui-egui/tests/it/editing.rs` `a_paragraph_whose_edit_fails_stays_open_with_its_typing` uses Devanagari U+0915.
 6. Verify (see Verification), then release (see Release).
 
 ## Fonts the fork finds
@@ -60,7 +61,7 @@ Status: written 2026-10-28 for the rebuild on v0.14.0, from the v0.9.0 fork (tag
 - With no Thai face available, saving keeps `/V` and shows the warning.
 - "น้ำ" extracts as "น้ำ", not "น ้ำ" or with the marks reordered.
 
-Last seen in (v0.14.0): `fonts/src/thai.rs` (lookup, shape, embed, `embedded_face`, x_height, mark_top, wrap). `forms/src/appearance.rs`: `FontText::Thai` (upstream's field-font enum gained a variant, so `/DR` lookup, widths, wrapping and overflow all see Sarabun) and `field_appearance_written`, the one step that embeds and rewrites `/DA` before upstream's read-only drawing; `redraw` (lib.rs) and `redraw_widgets` (author.rs) call it. `forms/src/lib.rs` (field_len, clip_to_max_len). `engine` (install_thai_faces), `render/src/text.rs` (mark order). Tests: `forms/src/thai_tests.rs`, and the ones that render in `engine/tests/it/thai_forms.rs` (forms may not depend on render: `cargo xtask layers`).
+Last seen in (v0.16.1): `fonts/src/thai.rs` (lookup, shape, embed, `embedded_face`, x_height, mark_top, wrap). `forms/src/appearance.rs`: `FontText::Thai` (upstream's field-font enum gained a variant, so `/DR` lookup, widths, wrapping and overflow all see Sarabun) and `field_appearance_written`, the one step that embeds and rewrites `/DA` before upstream's read-only drawing; `redraw` (values.rs) and `redraw_widgets` (author/look.rs) call it. `forms/src/lib.rs` (field_len, clip_to_max_len; MaxLen check in values.rs `write_value`). `engine/src/lib.rs` (install_thai_faces; the app calls it in `ui-egui/src/app.rs`), `render/src/text/order.rs` (mark order in `place_glyphs`). Not covered: upstream's display-only redraw of fields without appearances or with `/NeedAppearances` (`forms/src/appearances.rs`, #3470) still uses `field_appearance_drawn`, so a Thai value another app left for the viewer to draw shows `?` in PdfCraft; the fork's own fills always write an appearance. Tests: `forms/src/thai_tests.rs`, and the ones that render in `engine/tests/it/thai_forms.rs` (forms may not depend on render: `cargo xtask layers`).
 Upstream at v0.14.0 has its own Thai shaping (`fonts/src/shaping.rs`), but only with the built-in craft-fonts face, so it can't serve a runtime-found Sarabun.
 
 ## B. Interface and fill editor
@@ -76,7 +77,7 @@ Upstream at v0.14.0 has its own Thai shaping (`fonts/src/shaping.rs`), but only 
 - Thai shows in menus, dialogs and the fill editor (no tofu).
 - While typing three lines of Thai into a multiline field next to Latin fields, each line stays level with its neighbours, before and after the field is committed.
 
-Last seen in (v0.14.0): `ui-egui/src/forms_ui.rs` (LINE_PITCH, pitched_job, MaxLen clip after each edit).
+Last seen in (v0.16.1): `ui-egui/src/tools/forms_ui.rs` (LINE_PITCH, pitched_job, MaxLen clip in `settle_text_editor`).
 
 ## C. Comments: text boxes, callouts, Fill & Sign text
 
@@ -92,7 +93,7 @@ Last seen in (v0.14.0): `ui-egui/src/forms_ui.rs` (LINE_PITCH, pitched_job, MaxL
 - A text box, a callout and a Fill & Sign text holding "สวัสดีครับ" render correctly, flatten without a refusal, and read back as typed.
 - A text box holding Chinese behaves exactly as on plain upstream.
 
-Last seen in (v0.14.0): `annot/src/appearance.rs` (`thai_face_for`, `build_with`), `annot/src/lib.rs` (`draw_appearance`, `thai_text`, catalog `/PCThaiFonts`); tests `annot/src/thai_tests.rs`. The old patch applied almost unchanged.
+Last seen in (v0.16.1): `annot/src/appearance.rs` (`thai_face_for`, `build_with`, `draw_free_text`), `annot/src/draw.rs` (`draw_appearance`, `thai_text`, catalog `/PCThaiFonts`); tests `annot/src/thai_tests.rs`.
 
 ## D. Editing existing Thai text
 
@@ -120,7 +121,7 @@ Last seen in (v0.14.0): `annot/src/appearance.rs` (`thai_face_for`, `build_with`
 - Chrome-made "น้ำ" and "เป็น" (ActualText) edit and read back as typed.
 - No macOS "access data from other apps" prompt at start-up.
 
-Last seen in (v0.14.0): `fonts/src/installed.rs`, `fonts/src/thai.rs` (repair_sara_am, line_breaks), `edit/src/text.rs` (`LineEdit::notice`; the repair runs after the bidi pass in `text_lines`), `edit/src/text_regions.rs` (`thai_fallback`, `installed_full_face`, `splits_only_between_clusters`, MIN_FIT, `wrap_rows` inside `rewrite_styled_block`), `engine` (install_thai_faces installs the font folders; `edit_font_notices`), `ui-egui/src/editing.rs` (the notice toast); tests `edit/src/thai_tests.rs`.
+Last seen in (v0.16.1): `fonts/src/installed.rs`, `fonts/src/thai.rs` (repair_sara_am, line_breaks), `edit/src/text/rewrite.rs` (`LineEdit::notice`), `edit/src/text/lines.rs` (the repair runs after the bidi pass in `text_lines_in`), `edit/src/text_regions/grouping.rs` (Thai rows join without a space), `edit/src/text_regions/styled.rs` (`thai_fallback`, `FontResolver::sarabun_font` / `installed_font`, `splits_only_between_clusters` in `validate_contextual_rows`, MIN_FIT, `wrap_styled_rows` with Thai breaks and per-row room), `engine` (install_thai_faces installs the font folders; the notice is upstream's `EditNotice::Font`, filled from `EditCtx::font_notices` in `edit/run.rs` and `session/editing.rs`), `ui-egui/src/editing.rs` (the notice toast); tests `edit/src/thai_tests.rs`.
 Upstream at v0.14.0 shapes complex edits itself (`shape_source`) once a full face sits in the page's font resources, and otherwise asks the user to load one (RegisterTextFont); the fork's installed face and Sarabun fallback are embedded as page fonts first, so upstream's shaping picks them up.
 
 ## E. Rich-text formatting in field values
@@ -147,7 +148,7 @@ Full user stories, decisions and test seams: issue pichitc54/pdfcraft#1. Upstrea
 
 Test seams: the engine's set-field-value edit / form-fill tool (what lands in the PDF) and the UI harness (editor and panel behaviour).
 
-Last seen in (v0.14.0): `forms/src/rich.rs` (model, `/RV` reader and writer), `forms/src/lib.rs` (`Field::rich`, `allows_rich`, `FieldValue::Rich` in `write_value`), `forms/src/rich_appearance.rs` (a child module of the appearance code: pens, layout, `prepare`/`draw`), `automation/src/forms.rs` (`{"rich": …}` in form_fill, `rich` in form_fields), `ui-egui/src/rich_field_ui.rs` (the editor's per-character styles, layouter, panel mapping), `ui-egui/src/forms_ui.rs` (`Focus::rich`, ⌘B/⌘I/⌘U, `rich_panel`), `ui-egui/src/format_text_ui.rs` (`FieldFormat`: strikethrough, superscript, subscript, more families), `ui-egui/src/commands.rs` (⌘B/⌘I/⌘U left to a rich field: upstream binds ⌘B to New bookmark). Tests: `forms/src/rich_tests.rs`, `automation/tests/it/rich_form_fill.rs`, `engine/tests/it/thai_forms.rs`, `ui-egui/tests/it/rich_fields.rs`.
+Last seen in (v0.16.1): `forms/src/rich.rs` (model, `/RV` reader and writer), `forms/src/lib.rs` (`Field::rich`, `allows_rich`, `FieldValue::Rich`), `forms/src/read.rs` (`rich_of`), `forms/src/values.rs` (`write_value`, `default_style`), `forms/src/rich_appearance.rs` (a child module of the appearance code: pens, layout, `prepare`/`draw`), `automation/src/forms.rs` (`{"rich": …}` in form_fill, `rich` in form_fields), `ui-egui/src/tools/rich_field_ui.rs` (the editor's per-character styles, layouter, panel mapping), `ui-egui/src/tools/forms_ui.rs` (`Focus::rich`, ⌘B/⌘I/⌘U, `rich_panel`), `ui-egui/src/panels/format_text_ui.rs` (`FieldFormat`, the panel's last argument: strikethrough, superscript, subscript, more families), `ui-egui/src/commands.rs` (`registry_shortcuts` leaves ⌘B/⌘I/⌘U to a rich field: upstream binds ⌘B to New bookmark). Tests: `forms/src/rich_tests.rs`, `automation/tests/it/rich_form_fill.rs`, `engine/tests/it/thai_forms.rs`, `ui-egui/tests/it/rich_fields.rs`.
 
 ## F. Movable dialogs and floating panels
 
@@ -172,7 +173,7 @@ Not Thai-specific, but part of the fork so every rebuild carries it. Upstream (v
 
 Full user stories and decisions: issue pichitc54/pdfcraft#2. Test seam: the UI harness (kittest pointer drags, as `ui-egui/tests/it/rich_fields.rs` already does for the panel).
 
-Last seen in (v0.14.0): `ui-egui/src/widgets.rs` (`show_placed_modal`: the shared modal anchored at a remembered offset, a background drag handle registered before the contents, `clamp_offset`), `ui-egui/src/dialogs.rs` (the one `Dialog` modal placed per dialog kind), `ui-egui/src/forms_ui.rs` (`rich_panel`: a movable area, `current_pos` beside the field until dragged). Upstream's two combine prompts call egui's modal directly and stay centred. Tests: `ui-egui/tests/it/movable_dialogs.rs`, `rich_fields::the_format_panel_drags_away_and_keeps_formatting_the_selection`.
+Last seen in (v0.16.1): `ui-egui/src/widgets.rs` (`show_placed_modal`: the shared modal anchored at a remembered offset, a background drag handle registered before the contents, `clamp_offset`), `ui-egui/src/dialogs.rs` (the one `Dialog` modal placed per dialog kind), `ui-egui/src/tools/forms_ui.rs` (`rich_panel`: a movable area, `current_pos` beside the field until dragged). Upstream's two combine prompts call egui's modal directly and stay centred. Tests: `ui-egui/tests/it/movable_dialogs.rs`, `rich_fields::the_format_panel_drags_away_and_keeps_formatting_the_selection`.
 
 ## Out of scope
 

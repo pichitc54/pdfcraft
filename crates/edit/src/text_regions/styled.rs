@@ -942,6 +942,69 @@ fn splice_with_marker(
 
 /// Rewrite visual rows while keeping the source style on each surviving character. Resource
 /// names may differ between Unicode subsets of the same face; encoding searches those subsets.
+/// The notice for a paragraph set in Sarabun, and per source run the size factor that gives
+/// Sarabun the source's declared x-height.
+fn sarabun_sizes(
+    doc: &Document,
+    fonts: &Dict,
+    block: &TextBlock,
+    lines: &[TextLine],
+    sarabun: Option<&(&'static pdfcraft_fonts::thai::ThaiFaces, Vec<String>)>,
+) -> (Option<String>, HashMap<usize, f64>) {
+    let mut scale = HashMap::new();
+    let Some((faces, missing)) = sarabun else { return (None, scale) };
+    for &index in &block.lines {
+        let Some(source) = lines.get(index) else { continue };
+        let face = faces.for_style(source.bold, source.italic);
+        if let (Some(x_src), Some(x_sar)) = (declared_x_height(doc, fonts, &source.font), pdfcraft_fonts::thai::x_height(face)) {
+            scale.insert(index, (x_src / x_sar).clamp(0.5, 1.5));
+        }
+    }
+    (Some(format!("Set in Sarabun: {} isn't installed on this computer", missing.join(", "))), scale)
+}
+
+/// [`wrap_styled_rows`] for an edit of `block`, and the width factor it was condensed to. Thai has
+/// no spaces between words: it breaks at dictionary word boundaries. A one-line edit grows to the
+/// right like any other; a Thai paragraph of several lines that would need another is condensed
+/// instead (down to MIN_FIT), since a new row would land on the text below (ADR 0002).
+fn wrap_fitted(
+    chars: &[StyledChar],
+    block: &TextBlock,
+    lines: &[TextLine],
+    style: &BlockStyle,
+    width: f64,
+    thai: bool,
+    measure: impl Fn(&[StyledChar]) -> Result<f64, EditError> + Copy,
+) -> Result<(f64, WrappedStyledRows), EditError> {
+    let breaks: std::collections::HashSet<usize> = if thai {
+        let all: String = chars.iter().map(|c| c.0).collect();
+        pdfcraft_fonts::thai::line_breaks(&all).into_iter().collect()
+    } else {
+        Default::default()
+    };
+    // The room on each row: a source row that starts to the right of the paragraph's left edge (a
+    // first line sharing its line with other text) only has the room up to the paragraph's right
+    // edge (grown, for a one-line paragraph).
+    let room = |row: usize| -> f64 {
+        if style.width.is_some() {
+            return width;
+        }
+        block.rows.get(row).and_then(|r| row_rect(r, lines)).map_or(width, |r| (block.rect[0] + width - r[0]).clamp(1.0, width))
+    };
+    let wrapped = wrap_styled_rows(chars, room, &breaks, 1.0, measure)?;
+    if thai && style.width.is_none() && style.scale.is_none() && block.rows.len() > 1 && wrapped.0.len() > block.rows.len() {
+        let mut f = 0.99;
+        while f >= MIN_FIT - 1e-9 {
+            let condensed = wrap_styled_rows(chars, room, &breaks, f, measure)?;
+            if condensed.0.len() <= block.rows.len().max(1) {
+                return Ok((f, condensed));
+            }
+            f -= 0.01;
+        }
+    }
+    Ok((1.0, wrapped))
+}
+
 pub(crate) fn rewrite_styled_block(
     doc: &mut Document,
     page: usize,
@@ -972,19 +1035,7 @@ pub(crate) fn rewrite_styled_block(
     // Thai that some run's font can't draw (its subset, an installed or approved full face): the
     // whole paragraph is set in the Thai document face (ADR 0002), so it uses one family.
     let sarabun = thai_fallback(doc, &fonts, block, lines, draft, shaping);
-    let mut notice = None;
-    // Per source run, the size factor that gives Sarabun the source's declared x-height.
-    let mut sarabun_scale: HashMap<usize, f64> = HashMap::new();
-    if let Some((faces, missing)) = &sarabun {
-        notice = Some(format!("Set in Sarabun: {} isn't installed on this computer", missing.join(", ")));
-        for &index in &block.lines {
-            let Some(source) = lines.get(index) else { continue };
-            let face = faces.for_style(source.bold, source.italic);
-            if let (Some(x_src), Some(x_sar)) = (declared_x_height(doc, &fonts, &source.font), pdfcraft_fonts::thai::x_height(face)) {
-                sarabun_scale.insert(index, (x_src / x_sar).clamp(0.5, 1.5));
-            }
-        }
-    }
+    let (notice, sarabun_scale) = sarabun_sizes(doc, &fonts, block, lines, sarabun.as_ref());
     let prepared = CharacterPreparation {
         doc,
         first,
@@ -1072,41 +1123,8 @@ pub(crate) fn rewrite_styled_block(
         }
         Ok(width)
     };
-    // Thai has no spaces between words: it breaks at dictionary word boundaries. A one-line edit
-    // grows to the right like any other; a Thai paragraph of several lines that would need another
-    // is condensed instead (down to MIN_FIT), since a new row would land on the text below (ADR 0002).
     let thai = draft.chars().any(|c| ('\u{0e00}'..='\u{0e7f}').contains(&c));
-    let breaks: std::collections::HashSet<usize> = if thai {
-        let all: String = chars.iter().map(|c| c.0).collect();
-        pdfcraft_fonts::thai::line_breaks(&all).into_iter().collect()
-    } else {
-        Default::default()
-    };
-    // The room on each row: a source row that starts to the right of the paragraph's left edge (a
-    // first line sharing its line with other text) only has the room up to the paragraph's right
-    // edge (grown, for a one-line paragraph).
-    let room = |row: usize| -> f64 {
-        if style.width.is_some() {
-            return width;
-        }
-        block.rows.get(row).and_then(|r| row_rect(r, lines)).map_or(width, |r| (block.rect[0] + width - r[0]).clamp(1.0, width))
-    };
-    let mut fit = 1.0;
-    let (mut rows, mut row_ranges, mut row_lines, mut row_soft, mut row_gap) = wrap_styled_rows(&chars, &room, &breaks, fit, &measure)?;
-    // A Thai edit that would need more lines than its paragraph of several had is condensed (down
-    // to MIN_FIT) to keep its line count: a new line would land on the text below.
-    if thai && style.width.is_none() && style.scale.is_none() && block.rows.len() > 1 && rows.len() > block.rows.len() {
-        let mut f = 0.99;
-        while f >= MIN_FIT - 1e-9 {
-            let condensed = wrap_styled_rows(&chars, &room, &breaks, f, &measure)?;
-            if condensed.0.len() <= block.rows.len().max(1) {
-                fit = f;
-                (rows, row_ranges, row_lines, row_soft, row_gap) = condensed;
-                break;
-            }
-            f -= 0.01;
-        }
-    }
+    let (fit, (rows, row_ranges, row_lines, row_soft, row_gap)) = wrap_fitted(&chars, block, lines, style, width, thai, measure)?;
     let streams = content_streams(doc, &p.dict)?;
     let pieces = Pieces::join(&streams.iter().map(|(_, d)| d.as_slice()).collect::<Vec<_>>());
     let ops = pieces.parse().ops;
@@ -1135,11 +1153,12 @@ pub(crate) fn rewrite_styled_block(
     // What is in force where the rewrite is drawn, and what the text after it expects.
     let after = if split { &o.state } else { &o.bt_state };
     validate_contextual_rows(&rows, &kept)?;
-    if thai && rows.len() > block.rows.len() {
-        notice.get_or_insert_with(|| {
-            "The edited text is longer than its line, so it wraps onto a new line; check that it doesn't overlap the text below".into()
-        });
-    }
+    // A Thai edit longer than its lines, even condensed, wraps onto a new one: said, as it may
+    // land on the text below.
+    let notice = notice.or_else(|| {
+        (thai && rows.len() > block.rows.len())
+            .then(|| "The edited text is longer than its line, so it wraps onto a new line; check that it doesn't overlap the text below".into())
+    });
     let measured: Vec<_> = rows.iter().map(|row| measure(row).map(|w| w * fit)).collect::<Result<_, _>>()?;
     let shaped = prepare_shaped_rows(doc, &fonts, &rows, &kept, advance)?;
     let ShapedRows { runs: shaped_runs, advances: segment_advances } = shaped;

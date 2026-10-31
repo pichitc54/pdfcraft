@@ -25,7 +25,7 @@ pub(super) fn rich_for(doc: &Document, f: &Field, text: &str) -> Option<RichValu
         return None;
     }
     let d = doc.get(f.obj).as_dict().cloned()?;
-    let rv = crate::rich_of(doc, &d)?;
+    let rv = crate::read::rich_of(doc, &d)?;
     rv.shows(text).then_some(rv)
 }
 
