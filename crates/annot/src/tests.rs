@@ -2250,3 +2250,6 @@ fn freehand_highlight_is_compatible_ink_with_marker_blending() {
         assert!((a - b).abs() < 1e-4, "expected [10, 90, 130, 110], got {rect_from_border:?}");
     }
 }
+
+#[path = "thai_tests.rs"]
+mod thai;
