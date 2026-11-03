@@ -565,13 +565,13 @@ fn walk(
 }
 
 /// The field dictionary's `/RV` (a text string or stream), read.
-pub(crate) fn rich_of(doc: &Document, d: &Dict) -> Option<rich::RichValue> {
+pub(crate) fn rich_of(doc: &Document, d: &Dict) -> Option<crate::rich::RichValue> {
     let xhtml = match &*doc.resolve(d.get(b"RV")?) {
         Object::String(s) => s.to_text(),
-        Object::Stream(st) => String::from_utf8_lossy(&st.decoded_within(rich::MAX_RV_BYTES).ok()?).into_owned(),
+        Object::Stream(st) => String::from_utf8_lossy(&st.decoded_within(crate::rich::MAX_RV_BYTES).ok()?).into_owned(),
         _ => return None,
     };
-    rich::parse(&xhtml)
+    crate::rich::parse(&xhtml)
 }
 
 pub(crate) fn field_flags(doc: &Document, dict: &Dict) -> Option<u32> {

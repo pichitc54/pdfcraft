@@ -57,7 +57,7 @@ fn thai_comment_text_is_drawn_in_sarabun() {
     let t = add_annotation(&mut doc, &boxed, &meta("t")).unwrap();
     let mut doc = reopen(&doc);
     // A restyle redraws it in Sarabun again instead of refusing.
-    set_style(&mut doc, 0, t, Some([1.0, 0.0, 0.0]), None, None, None, &meta("")).unwrap();
+    set_style(&mut doc, 0, t, StyleChange::new(Some([1.0, 0.0, 0.0]), None, None, None), &meta("")).unwrap();
     let doc = reopen(&doc);
     for i in [f, t] {
         let d = &list(&doc, 0)[i];
