@@ -76,12 +76,16 @@ pub enum EditNotice {
     /// turning it on could paint over something (`pdfcraft_edit::backdrops_left_off`). They look
     /// the same on white paper.
     BackdropsLeftOff { pages: Vec<usize> },
+    /// Why an edited paragraph looks different from the text around it (it was set in Sarabun
+    /// because its font isn't installed, or wrapped onto a new line): docs/thai-forms-spec.md area D.
+    Font(String),
 }
 
 impl std::fmt::Display for EditNotice {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             EditNotice::Undrawn(n) => n.fmt(f),
+            EditNotice::Font(m) => f.write_str(m),
             EditNotice::BackdropsLeftOff { pages } => {
                 let (which, own) = if pages.len() == 1 { ("page", "its") } else { ("pages", "their") };
                 write!(
