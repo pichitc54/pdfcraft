@@ -202,6 +202,22 @@ pub struct FieldLook {
     pub italic: bool,
 }
 
+/// The family the Format text panel names for a field's own font, from the resource its `/DA`
+/// names: a standard family's label (`Helv`, `TiBo`, `Cour`), else the name without its style
+/// suffix (`Sarabun-Regular` is Sarabun, `AngsanaNew,Bold` is AngsanaNew).
+pub fn field_family(da: &str) -> String {
+    let toks: Vec<&str> = da.split_whitespace().collect();
+    let resource =
+        toks.iter().position(|t| *t == "Tf").and_then(|i| i.checked_sub(2)).and_then(|i| toks.get(i)).map_or("", |s| s.trim_start_matches('/'));
+    match resource.get(..2).map(str::to_ascii_lowercase).as_deref() {
+        _ if resource.is_empty() => "Helvetica".into(),
+        Some("he") => "Helvetica".into(),
+        Some("ti") => "Times".into(),
+        Some("co") => "Courier".into(),
+        _ => resource.split(['-', ',']).next().unwrap_or(resource).to_string(),
+    }
+}
+
 impl FieldLook {
     pub fn of(f: &FormField, shown_size: f64) -> Self {
         let toks: Vec<&str> = f.da.split_whitespace().collect();
@@ -404,6 +420,17 @@ mod tests {
 
     fn draft(text: &str) -> RichDraft {
         RichDraft::from_rich(&RichValue::plain(text))
+    }
+
+    #[test]
+    fn the_panel_names_the_fields_own_font() {
+        let with = field_family;
+        assert_eq!(with("/Sarabun-Regular 3.5 Tf 0 g"), "Sarabun");
+        assert_eq!(with("/AngsanaNew,Bold 6 Tf 0 g"), "AngsanaNew");
+        assert_eq!(with("/Helv 12 Tf 0 g"), "Helvetica");
+        assert_eq!(with("/TiBo 12 Tf 0 g"), "Times");
+        assert_eq!(with("/Cour 12 Tf 0 g"), "Courier");
+        assert_eq!(with("0 g"), "Helvetica");
     }
 
     #[test]

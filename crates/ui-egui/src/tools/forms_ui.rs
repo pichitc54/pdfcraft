@@ -1125,10 +1125,23 @@ fn rich_panel(ctx: &egui::Context, view: &mut DocView, f: &FormField, widget: us
     let viewport = view.viewport_rect();
     let Some(fx) = view.forms.focus.as_mut() else { return };
     let Some(draft) = fx.rich.as_mut() else { return };
-    let range = selection(ctx, field_id, &fx.text);
+    // egui forgets a text box's selection when it loses the keyboard, as it does to the panel's
+    // size box: the panel acts on the selection the field last had.
+    let kept = field_id.with("panel-selection");
+    let range = if ctx.memory(|m| m.has_focus(field_id)) {
+        let range = selection(ctx, field_id, &fx.text);
+        ctx.data_mut(|d| d.insert_temp(kept, range.clone()));
+        range
+    } else {
+        ctx.data(|d| d.get_temp::<std::ops::Range<usize>>(kept)).unwrap_or_else(|| selection(ctx, field_id, &fx.text))
+    };
     let look = FieldLook::of(f, f64::from(field_text_size_pt(f, &fx.text, rect, zoom)));
     let before = PanelState::of(&draft.style_of(&range), draft.align_of(&range), &look);
     let mut state = PanelState::of(&draft.style_of(&range), draft.align_of(&range), &look);
+    // Text with no family of its own is in the field's font: the list names that one.
+    if draft.style_of(&range).family.is_none() {
+        state.shown = crate::rich_field_ui::field_family(&f.da);
+    }
     const PANEL_W: f32 = 300.0;
     const PANEL_H: f32 = 230.0;
     let below = rect.bottom() + 6.0;
@@ -1177,6 +1190,11 @@ fn rich_panel(ctx: &egui::Context, view: &mut DocView, f: &FormField, widget: us
         // kept); a number being typed into the panel keeps it there.
         if ctx.memory(|m| m.focused()).is_none_or(|id| id == field_id) {
             fx.request_focus = true;
+            if let Some(mut st) = egui::TextEdit::load_state(ctx, field_id) {
+                let (a, b) = (egui::text::CCursor::new(range.start), egui::text::CCursor::new(range.end));
+                st.cursor.set_char_range(Some(egui::text::CCursorRange::two(a, b)));
+                st.store(ctx, field_id);
+            }
         }
         ctx.request_repaint();
     }
