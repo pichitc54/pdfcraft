@@ -12,6 +12,9 @@ use crate::PdfCraftApp;
 /// Where every PdfCraft release is listed.
 pub const RELEASES_PAGE: &str = "https://github.com/storytold/pdfcraft/releases";
 
+/// What Help ▸ Check for updates says in this personal Thai build.
+pub const FORK_NOTICE: &str = "This is a personal Thai build of PdfCraft, so it doesn't update itself: upstream's releases don't have its Thai support. Upgrade by rebuilding it on the new release (docs/thai-forms-spec.md).";
+
 /// Stands in for the network in tests.
 #[cfg(not(target_arch = "wasm32"))]
 pub type UpdateSource = CheckSource;
@@ -43,10 +46,12 @@ impl Default for Updates {
 }
 
 impl PdfCraftApp {
-    /// Whether the app asks for a newer release on its first frame (off until the desktop app turns it on).
+    /// Whether the app asks for a newer release on its first frame: never in this personal Thai
+    /// build, whose upgrades are rebuilds (docs/thai-forms-spec.md area G). Upstream's releases
+    /// have no Thai form support, so installing one would lose it.
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn set_startup_update_check(&mut self, on: bool) {
-        self.updates.startup_check = on;
+    pub fn set_startup_update_check(&mut self, _on: bool) {
+        self.updates.startup_check = false;
     }
 
     /// Replaces the network with `source` (tests).
@@ -55,17 +60,11 @@ impl PdfCraftApp {
         self.updates.updater = Updater::new(&crate::UPDATE_APP, env!("CARGO_PKG_VERSION")).with_source(source);
     }
 
-    /// Help ▸ Check for updates: ask for the latest release and show the outcome.
+    /// Help ▸ Check for updates: says this is a personal Thai build and opens upstream's release
+    /// notes; nothing is downloaded (see [`Self::set_startup_update_check`]).
     pub fn check_for_updates(&mut self) {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            self.updates.open = true;
-            self.updates.check_requested = true;
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            self.open_url(RELEASES_PAGE);
-        }
+        self.notify(FORK_NOTICE);
+        self.open_url(RELEASES_PAGE);
     }
 
     /// Starts the checks and picks up their answers (each frame).

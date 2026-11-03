@@ -689,7 +689,7 @@ mod typed_size_tests {
                     return;
                 }
                 let fonts = Fonts { sources: Some(&[]), shown: tl!("Mixed").into(), mixed_size: true };
-                panel(ui, &Tokens::get(ui.ctx()), look, None, fonts, None);
+                panel(ui, &Tokens::get(ui.ctx()), look, None, fonts, None, None);
             },
             AddedText::default(),
         );
