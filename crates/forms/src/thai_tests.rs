@@ -232,3 +232,33 @@ fn a_thai_first_line_keeps_its_stacked_marks_inside_the_field() {
         assert!(first + top * drawn <= height + 1e-6, "size {drawn}: the marks reach {} above a {height} box", first + top * drawn);
     }
 }
+
+/// A form another app left for the viewer to draw (`/NeedAppearances`), with Thai in a
+/// Helvetica field: the display copy draws it in Sarabun without `?`, and the document itself
+/// keeps its own `/DA`, fonts and appearance.
+#[test]
+fn a_thai_value_left_to_the_viewer_is_shown_in_sarabun() {
+    if sarabun("a_thai_value_left_to_the_viewer_is_shown_in_sarabun").is_none() {
+        return;
+    }
+    let thai = "ห้าหมื่นเจ็ดพันบาทถ้วน";
+    let value: String = std::iter::once("FEFF".to_string()).chain(thai.encode_utf16().map(|u| format!("{u:04X}"))).collect();
+    let doc = document(&[
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Annots [6 0 R] >>".into(),
+        "<< /Fields [6 0 R] /NeedAppearances true /DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv 5 0 R >> >> >>".into(),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
+        format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T (amount) /V <{value}> /DA (/Helv 12 Tf 0 g) /Rect [50 700 400 720] /P 3 0 R /AP << /N 7 0 R >> >>"
+        ),
+        "<< /Length 4 >>\nstream\nq\nQ\nendstream".into(),
+    ]);
+    let copy = with_field_appearances(&doc).expect("the form leaves its fields to the viewer");
+    assert_eq!(appearance_font(&copy, "amount"), "Sarabun-Regular");
+    assert!(!ap(&copy, &field(&fields(&copy), "amount").widgets[0]).contains('?'), "nothing drawn as ?");
+    assert_eq!(sarabun_files(&doc), 0, "the document embeds nothing");
+    let original = fields(&doc);
+    assert_eq!(field(&original, "amount").da, "/Helv 12 Tf 0 g");
+    assert_eq!(ap(&doc, &field(&original, "amount").widgets[0]).trim_end(), "q\nQ", "the document keeps its own appearance");
+}

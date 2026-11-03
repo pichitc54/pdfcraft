@@ -65,12 +65,25 @@ pub fn with_field_appearances_cached(doc: &Document, cache: &mut FieldAppearance
             let stream = match cache.get(w.obj, &inputs) {
                 Some(stream) => stream,
                 None => {
-                    let stream = match f.kind {
-                        FieldKind::CheckBox | FieldKind::Radio => appearance::button_state_shown(doc, &f, w, state.as_deref() != Some("Off")),
-                        FieldKind::PushButton => appearance::push_button_shown(doc, &f, w),
-                        _ => appearance::field_appearance_drawn(doc, &f, w, &f.value, true).0,
+                    let (stream, own_font) = match f.kind {
+                        FieldKind::CheckBox | FieldKind::Radio => {
+                            (appearance::button_state_shown(doc, &f, w, state.as_deref() != Some("Off")), false)
+                        }
+                        FieldKind::PushButton => (appearance::push_button_shown(doc, &f, w), false),
+                        _ => match appearance::field_appearance_drawn(doc, &f, w, &f.value, true) {
+                            // Thai the field's font can't draw is drawn in the Thai document face, as
+                            // filling the field would (docs/thai-forms-spec.md area A). The face is
+                            // embedded in this copy only, so the drawing can't be reused for the next.
+                            (_, Some(_)) if pdfcraft_fonts::thai::installed_document_faces().is_some() => {
+                                let target = copy.get_or_insert_with(|| doc.clone());
+                                (appearance::field_appearance_written(target, &f, w, &f.value, true).0, true)
+                            }
+                            (stream, _) => (stream, false),
+                        },
                     };
-                    cache.insert(w.obj, inputs, &stream);
+                    if !own_font {
+                        cache.insert(w.obj, inputs, &stream);
+                    }
                     stream
                 }
             };
