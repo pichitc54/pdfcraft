@@ -30,6 +30,17 @@ pub(crate) enum FontChoice {
     Load,
     /// A font file installed on this computer.
     Installed(std::path::PathBuf),
+    /// A family by name, beyond the standard three: what a rich text field's list offers
+    /// (Sarabun, installed fonts that may be embedded).
+    Named(String),
+}
+
+/// What the panel adds for a rich text field's selection (docs/thai-forms-spec.md area E):
+/// strikethrough, superscript and subscript, and more families. Line spacing stays off there.
+pub(crate) struct FieldFormat<'a> {
+    pub strike: bool,
+    pub vertical: pdfcraft_engine::form_rich::Vertical,
+    pub families: &'a [String],
 }
 
 /// What the font list offers and shows.
@@ -141,8 +152,10 @@ pub(crate) fn panel(
     extras: Option<&mut Extras>,
     fonts: Fonts,
     paragraphs: Option<Paragraphs>,
+    mut field: Option<&mut FieldFormat>,
 ) -> Outcome {
-    let before = (look.clone(), extras.as_deref().copied());
+    use pdfcraft_engine::form_rich::Vertical;
+    let before = (look.clone(), extras.as_deref().copied(), field.as_deref().map(|f| (f.strike, f.vertical)));
     let mut out = Outcome::default();
     widgets::section_title(ui, tl!("Format text"));
 
@@ -168,6 +181,14 @@ pub(crate) fn panel(
                 for f in [FontFamily::Helvetica, FontFamily::Times, FontFamily::Courier] {
                     if ui.selectable_label(fonts.sources.is_none() && look.family == f, f.label()).clicked() {
                         out.font = Some(FontChoice::Family(f));
+                    }
+                }
+                if let Some(families) = field.as_deref().map(|f| f.families).filter(|f| !f.is_empty()) {
+                    ui.separator();
+                    for name in families {
+                        if ui.selectable_label(fonts.shown == *name, name).clicked() {
+                            out.font = Some(FontChoice::Named(name.clone()));
+                        }
                     }
                 }
                 if fonts.sources.is_some() {
@@ -334,6 +355,15 @@ pub(crate) fn panel(
                     out.script = Some(script);
                 }
             }
+        } else if let Some(f) = field.as_deref_mut() {
+            if icons::button(ui, "strikethrough", 30.0, f.strike, tl!("Strikethrough")).clicked() {
+                f.strike = !f.strike;
+            }
+            for (v, icon, tip) in [(Vertical::Super, "superscript", tl!("Superscript")), (Vertical::Sub, "subscript", tl!("Subscript"))] {
+                if icons::button(ui, icon, 30.0, f.vertical == v, tip).clicked() {
+                    f.vertical = if f.vertical == v { Vertical::Normal } else { v };
+                }
+            }
         } else {
             planned(ui, "superscript", tl!("Superscript"));
             planned(ui, "subscript", tl!("Subscript"));
@@ -348,7 +378,9 @@ pub(crate) fn panel(
     let editing = extras.is_some();
     let mut fallback = Extras::default();
     let e = extras.as_deref_mut().unwrap_or(&mut fallback);
-    ui.add_enabled_ui(editing, |ui| {
+    // A field's line pitch is fixed (rows line up with neighbouring fields), so not for fields.
+    let in_field = field.is_some();
+    ui.add_enabled_ui(editing && !in_field, |ui| {
         row(ui, |ui| {
             let label = labelled_icon(ui, t, "arrow-up-down", tl!("Line spacing"));
             let own = tl!("Auto").to_string();
@@ -404,7 +436,8 @@ pub(crate) fn panel(
     });
 
     out.size_committed = size_committed;
-    out.changed = out.changed || size_committed || (look.clone(), extras.as_deref().copied()) != before;
+    out.changed =
+        out.changed || size_committed || (look.clone(), extras.as_deref().copied(), field.as_deref().map(|f| (f.strike, f.vertical))) != before;
     ui.add_space(6.0);
     ui.separator();
     out

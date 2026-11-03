@@ -11,6 +11,7 @@ pub(super) mod link_ui;
 pub(super) mod measure_ui;
 pub(super) mod object_ui;
 pub mod prepare;
+pub mod rich_field_ui;
 pub(super) mod redact_ui;
 pub(super) mod sign_ui;
 pub(super) mod stamps_ui;
