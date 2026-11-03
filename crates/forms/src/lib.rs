@@ -303,6 +303,20 @@ fn name_obj(text: &str) -> Object {
     Object::Name(name_bytes(text))
 }
 
+/// A text value's length as `/MaxLen` and comb cells count it: grapheme clusters, so a Thai
+/// consonant with its vowel and tone marks (ที่) is one character.
+pub fn field_len(text: &str) -> usize {
+    use unicode_segmentation::UnicodeSegmentation as _;
+    text.graphemes(true).count()
+}
+
+/// The longest prefix of `text` with at most `max` characters as [`field_len`] counts them.
+pub fn clip_to_max_len(text: &str, max: usize) -> &str {
+    use unicode_segmentation::UnicodeSegmentation as _;
+    let end = text.grapheme_indices(true).nth(max).map_or(text.len(), |(i, _)| i);
+    text.get(..end).unwrap_or(text)
+}
+
 fn invalid<T>(m: impl Into<String>) -> Result<T, FormError> {
     Err(FormError::Invalid(m.into()))
 }

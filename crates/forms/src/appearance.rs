@@ -20,10 +20,19 @@
 //! `/MK /R` (0, 90, 180, 270, counterclockwise) lays the content out in the upright box and sets
 //! the appearance `/Matrix` so that box lands on the widget rectangle. Any other value is 0, and
 //! rotation 0 leaves `/Matrix` off.
+//!
+//! Text the field's font can't hold is drawn in the Thai document face (Sarabun) instead when the
+//! app installed one and it covers the text (ADR 0001): [`field_appearance_written`] embeds the
+//! face whole in `/DR` once, points the field's `/DA` at it (scaled to the field font's visual
+//! size) so other viewers redraw it the same, and records its shaped glyphs in the ToUnicode. The
+//! appearance then recognises that `/DR` font ([`FontText::Thai`]) and draws shaped glyphs with
+//! it, so nothing is reported as undrawn.
 
-use pdfcraft_cos::{Dict, Document, Object, Stream};
+use pdfcraft_cos::{Dict, Document, ObjRef, Object, PdfString, Stream};
 use pdfcraft_fonts::pdf::Metrics;
+use pdfcraft_fonts::thai::{self, ThaiFace, ThaiFaces};
 use pdfcraft_fonts::{UnicodeCMap, cjk_width, helvetica_width, literal, win_ansi, wrap_with};
+use unicode_segmentation::UnicodeSegmentation as _;
 
 use crate::{Field, FieldKind, Widget, acroform, flags};
 
@@ -112,7 +121,7 @@ pub fn text_box(doc: &Document, f: &Field, w: &Widget) -> TextBox {
     let wd = wobj.as_dict().cloned().unwrap_or_default();
     let (page_w, page_h) = ((w.rect[2] - w.rect[0]).max(1.0), (w.rect[3] - w.rect[1]).max(1.0));
     let place = placement(mk_rotation(doc, &wd), page_w, page_h);
-    let da = parse_da(wd.get(b"DA").and_then(|o| doc.resolve(o).as_string().map(|s| s.to_text())).as_deref().unwrap_or(&f.da));
+    let da = widget_da(doc, f, &wd);
     let pad = 2.0 + border_width(doc, &wd);
     let multiline = f.has(flags::MULTILINE);
     TextBox {
@@ -148,7 +157,7 @@ impl TextBox {
             // padding below the last line is not needed: `inner_h` plus 2 pt.
             // Long words break by character, so a line is wider than the box only when it is a
             // single character wider than the box, which the appearance still cuts at the sides.
-            let lines = wrap_with(&shown, size, self.inner_w, width_of);
+            let lines = font.wrap(&shown, size, self.inner_w);
             let above = lines.len().saturating_sub(1) as f64;
             above * size * 1.15 + 1.057 * size <= self.inner_h + 2.0 + 0.01 && lines.iter().all(|l| width_of(l, size) <= self.inner_w + 0.01)
         } else {
@@ -299,6 +308,9 @@ enum FontText {
     Simple(Box<Metrics>),
     /// A composite font with a predefined Unicode CMap.
     Unicode(UnicodeCMap),
+    /// The Thai document face, embedded whole by [`field_appearance_written`]: text is shaped
+    /// and drawn by glyph id ([`thai::show`]), never through [`Self::encode`].
+    Thai(&'static ThaiFace),
 }
 
 impl FontText {
@@ -308,12 +320,14 @@ impl FontText {
             // Selection checks every displayed string first; wrapping only removes line breaks.
             Self::Simple(metrics) => metrics.encode(&s.replace('\t', " ")).unwrap_or_default(),
             Self::Unicode(cmap) => cmap.encode(s),
+            Self::Thai(_) => Vec::new(),
         }
     }
 
     fn can_encode(&self, s: &str) -> bool {
         match self {
             Self::Simple(metrics) => metrics.encode(&s.replace('\t', " ")).is_some(),
+            Self::Thai(face) => thai::covers(face, s),
             _ => true,
         }
     }
@@ -328,6 +342,7 @@ impl FontText {
                 s.chars().map(|c| if c == '\t' { ' ' } else { c }).find(|c| metrics.encode(c.encode_utf8(&mut [0; 4])).is_none())
             }
             Self::Unicode(cmap) => cmap.first_unencodable(s),
+            Self::Thai(face) => s.chars().find(|c| !thai::covers(face, c.encode_utf8(&mut [0; 4]))),
         }
     }
 
@@ -340,7 +355,38 @@ impl FontText {
                 None => helvetica_width(s, size),
             },
             Self::Unicode(_) => cjk_width(s, size),
+            Self::Thai(face) => thai::shape(face, s).map_or(0.0, |r| r.glyphs.iter().map(|g| g.advance).sum::<f64>() * size),
         }
+    }
+
+    /// `text` broken into lines no wider than `width` at `size`: at spaces (and inside words
+    /// wider than a line), and for the Thai face also between Thai words.
+    fn wrap(&self, text: &str, size: f64, width: f64) -> Vec<String> {
+        match self {
+            Self::Thai(face) => thai::wrap(face, text, size, width),
+            _ => wrap_with(text, size, width, |t: &str, size: f64| self.width(t, size)),
+        }
+    }
+
+    /// Ascent and descent (both positive) in em, for placing a line in its box: the face's own
+    /// for Thai, else Helvetica's (0.718, 0.207).
+    fn vertical(&self) -> (f64, f64) {
+        match self {
+            Self::Thai(face) => thai::vertical_metrics(face).map_or((0.718, 0.207), |(a, d)| (a, -d)),
+            _ => (0.718, 0.207),
+        }
+    }
+
+    /// How far above the baseline the first line of a multiline field must sit, in em, at
+    /// `size` with `pad` points of padding above it: 0.85 em, the same for every font so fields
+    /// side by side line up row for row, but a Thai first line sits low enough for its tallest
+    /// stacked marks (ื่) to stay inside the box, which viewers clip.
+    fn first_baseline(&self, size: f64, pad: f64) -> f64 {
+        let room = match self {
+            Self::Thai(face) => thai::mark_top(face).map_or(0.0, |top| top * size - pad),
+            _ => 0.0,
+        };
+        (size * 0.85).max(room)
     }
 }
 
@@ -357,7 +403,12 @@ fn dr_font(doc: &Document, name: &str) -> Option<(Object, FontText)> {
         // Japanese, Chinese and Korean forms: a CID font addressed by Unicode (a non-embedded
         // `/HeiseiMin-W3` with `/UniJIS-UCS2-H`, say). Embedded CMap streams and Identity-H need
         // the font's own mapping, so those still fall back to Helvetica.
-        Some(b"Type0") => return Some((entry, FontText::Unicode(UnicodeCMap::from_name(fd.name(b"Encoding")?)?))),
+        Some(b"Type0") => {
+            if let Some(face) = thai::embedded_face(doc, fd) {
+                return Some((entry, FontText::Thai(face)));
+            }
+            return Some((entry, FontText::Unicode(UnicodeCMap::from_name(fd.name(b"Encoding")?)?)));
+        }
         _ => return None,
     }
     // Symbolic fonts (ZapfDingbats, Symbol) can't show WinAnsi text.
@@ -739,46 +790,201 @@ pub fn value_overflow(doc: &Document, f: &Field, w: &Widget) -> Option<Overflow>
     field_appearance_fit(doc, f, w, &f.value, true).2
 }
 
-/// [`field_appearance_drawn`], and whether the text drawn is cut off by the box.
-fn field_appearance_fit(doc: &Document, f: &Field, w: &Widget, values: &[String], format: bool) -> (Stream, Option<char>, Option<Overflow>) {
-    // The Format event: what is shown, not what is stored.
-    let formatted: Vec<String>;
+/// [`field_appearance_drawn`] for a caller that stores the appearance: when the field's font
+/// can't hold the text and the installed Thai document face covers all of it, or the field is
+/// already set in that face, the face is first put in the form's `/DR` and the field's `/DA` (see
+/// the module notes), so the appearance draws with it.
+pub fn field_appearance_written(doc: &mut Document, f: &Field, w: &Widget, values: &[String], format: bool) -> (Stream, Option<char>) {
+    field_appearance_written_with(doc, f, w, values, format, thai::installed_document_faces())
+}
+
+/// [`field_appearance_written`] with the Thai document faces to use (`None`: Thai is drawn as `?`).
+pub(crate) fn field_appearance_written_with(
+    doc: &mut Document,
+    f: &Field,
+    w: &Widget,
+    values: &[String],
+    format: bool,
+    faces: Option<&ThaiFaces>,
+) -> (Stream, Option<char>) {
+    if let Some(faces) = faces {
+        use_thai_face(doc, f, w, values, format, faces);
+    }
+    field_appearance_drawn(doc, f, w, values, format)
+}
+
+/// Point widget `w` of `f` at the Thai document face when the appearance of `values` needs it
+/// (see [`field_appearance_written`]), and record the glyphs it will draw in the face's ToUnicode.
+fn use_thai_face(doc: &mut Document, f: &Field, w: &Widget, values: &[String], format: bool, faces: &ThaiFaces) {
+    let (_, text) = shown_values(f, values, format);
+    let strings = shown_strings(f, &text);
+    let wd = doc.get(w.obj).as_dict().cloned().unwrap_or_default();
+    let mut da = widget_da(doc, f, &wd);
+    let current = dr_font(doc, &da.font);
+    let (font, face) = match &current {
+        // Already set in the Thai face (Latin text too stays in it).
+        Some((Object::Ref(font), FontText::Thai(face))) => (*font, *face),
+        _ => {
+            // The font the appearance would draw with otherwise, and whether it lacks a character.
+            let enc = current.map(|(_, enc)| enc).filter(|enc| strings.iter().all(|s| enc.can_encode(s))).unwrap_or(FontText::WinAnsi);
+            if strings.iter().all(|s| enc.first_unencodable(s).is_none()) {
+                return;
+            }
+            let (bold, italic) = da_style(doc, &da.font);
+            let face = faces.for_style(bold, italic);
+            // Only text the face can draw in full: anything else (Chinese, say) keeps the field
+            // font's own handling and is reported if undrawn.
+            if !strings.iter().all(|s| thai::covers(face, s)) {
+                return;
+            }
+            let Some((name, font)) = thai_resource(doc, face) else { return };
+            // Keep the field font's look by matching its declared x-height (Thai forms'
+            // BrowalliaUPC or Angsana are far smaller for their size than Sarabun).
+            if da.size > 0.0
+                && let (Some(field_x), Some(face_x)) = (declared_x_height(doc, &da.font), thai::x_height(face))
+            {
+                da.size = (da.size * (field_x / face_x).clamp(0.5, 1.5) * 10.0).round() / 10.0;
+            }
+            set_da_font(doc, f, w, &da, &name);
+            // The resource now names the installed face it was embedded from.
+            let Some(face) = doc.dict(&Object::Ref(font)).and_then(|d| thai::embedded_face(doc, &d)) else { return };
+            (font, face)
+        }
+    };
+    for s in &strings {
+        // Wrapping only splits between words and clusters, so these runs hold every glyph drawn.
+        if let Ok(run) = thai::shape(face, s) {
+            let _ = thai::add_unicode(doc, font, &run, s);
+        }
+    }
+}
+
+/// What the appearance of `values` shows: the values after the Format event (when `format`), and
+/// the text drawn from them (combo choices by their display names, password text as `*`).
+fn shown_values(f: &Field, values: &[String], format: bool) -> (Vec<String>, String) {
     let values = if format
         && matches!(f.kind, crate::FieldKind::Text | crate::FieldKind::Combo)
         && values.len() == 1
         && f.actions.format != crate::af::Format::None
     {
-        formatted = vec![crate::af::format_value(&f.actions.format, &values[0])];
-        &formatted[..]
+        vec![crate::af::format_value(&f.actions.format, &values[0])]
     } else {
-        values
+        values.to_vec()
     };
-    let wobj = doc.get(w.obj);
-    let wd = wobj.as_dict().cloned().unwrap_or_default();
-    let (page_w, page_h) = ((w.rect[2] - w.rect[0]).max(1.0), (w.rect[3] - w.rect[1]).max(1.0));
-    let place = placement(mk_rotation(doc, &wd), page_w, page_h);
-    let (width, height) = (place.layout_w, place.layout_h);
-    let da = parse_da(wd.get(b"DA").and_then(|o| doc.resolve(o).as_string().map(|s| s.to_text())).as_deref().unwrap_or(&f.da));
     let text: String = if f.kind == FieldKind::Combo {
         values.iter().map(|v| f.options.iter().find(|(e, _)| e == v).map_or(v.clone(), |(_, d)| d.clone())).collect::<Vec<_>>().join(", ")
     } else {
         values.first().cloned().unwrap_or_default()
     };
     let text = if f.has(flags::PASSWORD) { "*".repeat(text.chars().count()) } else { text };
-    let can_show = |enc: &FontText| {
-        if f.kind == FieldKind::List {
-            f.options.iter().all(|(_, display)| enc.can_encode(display))
-        } else if f.kind == FieldKind::Text && f.has(flags::MULTILINE) {
-            text.split(['\n', '\r']).all(|line| enc.can_encode(line))
-        } else {
-            enc.can_encode(&text)
-        }
-    };
-    let (font_name, font_obj, enc) = match dr_font(doc, &da.font).filter(|(_, enc)| can_show(enc)) {
+    (values, text)
+}
+
+/// The strings a font must show for `text` to be drawn in it: every option of a list box, each
+/// line of a multiline field, else the text itself.
+fn shown_strings<'a>(f: &'a Field, text: &'a str) -> Vec<&'a str> {
+    if f.kind == FieldKind::List {
+        f.options.iter().map(|(_, display)| display.as_str()).collect()
+    } else if f.kind == FieldKind::Text && f.has(flags::MULTILINE) {
+        text.split(['\n', '\r']).collect()
+    } else {
+        vec![text]
+    }
+}
+
+/// The `/DA` widget dictionary `wd` of `f` draws with: its own, else the field's as the document
+/// holds it now (which [`use_thai_face`] may just have changed), else the inherited one.
+fn widget_da(doc: &Document, f: &Field, wd: &Dict) -> Da {
+    let own = |d: &Dict| d.get(b"DA").and_then(|o| doc.resolve(o).as_string().map(|s| s.to_text()));
+    let field = || doc.get(f.obj).as_dict().and_then(own);
+    parse_da(own(wd).or_else(field).as_deref().unwrap_or(&f.da))
+}
+
+/// The form's `/DR /Font` dictionary.
+fn dr_fonts(doc: &Document) -> Option<Dict> {
+    acroform(doc).and_then(|af| af.get(b"DR").and_then(|o| doc.dict(o))).and_then(|dr| dr.get(b"Font").and_then(|o| doc.dict(o)))
+}
+
+/// The x-height (em) the `/DR` font `resource` declares in its font descriptor, if any.
+fn declared_x_height(doc: &Document, resource: &str) -> Option<f64> {
+    let font = dr_fonts(doc)?.get(resource.as_bytes()).and_then(|o| doc.dict(o))?;
+    let descriptor = font.get(b"FontDescriptor").and_then(|o| doc.dict(o))?;
+    let x = descriptor.get(b"XHeight").and_then(|o| doc.resolve(o).as_f64())?;
+    // Glyph space is 1000 units per em for TrueType and Type 1 descriptors.
+    (x.is_finite() && x > 0.0 && x < 1000.0).then_some(x / 1000.0)
+}
+
+/// Whether the `/DA` font `resource` is bold and/or italic: from its `/DR` BaseFont, or from the
+/// name itself (Acrobat's resource names: `HeBo`, `TiBI`, `CoOb`, …).
+fn da_style(doc: &Document, resource: &str) -> (bool, bool) {
+    let base = dr_fonts(doc)
+        .and_then(|fonts| fonts.get(resource.as_bytes()).and_then(|o| doc.dict(o)))
+        .and_then(|font| font.name(b"BaseFont").map(|n| String::from_utf8_lossy(n).into_owned()));
+    if let Some(base) = base {
+        let lower = base.to_ascii_lowercase();
+        return (["bold", "black", "heavy"].iter().any(|w| lower.contains(w)), lower.contains("italic") || lower.contains("oblique"));
+    }
+    match resource {
+        "HeBo" | "TiBo" | "CoBo" => (true, false),
+        "HeOb" | "TiIt" | "CoOb" => (false, true),
+        "HeBO" | "TiBI" | "CoBO" => (true, true),
+        _ => (false, false),
+    }
+}
+
+/// `face` in the form's `/DR`: the existing embedding when there is one, else embedded now and
+/// added under its PostScript name. Returns the resource name and the font; `None` if the face
+/// can't be embedded.
+fn thai_resource(doc: &mut Document, face: &ThaiFace) -> Option<(String, ObjRef)> {
+    let af_ref = crate::author::ensure_form(doc).ok()?;
+    let mut af = doc.get(af_ref).as_dict().cloned()?;
+    let mut dr = af.get(b"DR").and_then(|o| doc.dict(o)).unwrap_or_default();
+    let mut fonts = dr.get(b"Font").and_then(|o| doc.dict(o)).unwrap_or_default();
+    if let Some((name, font)) = thai::find_embedded(doc, &fonts, face) {
+        return Some((String::from_utf8_lossy(&name).into_owned(), font));
+    }
+    let font = thai::embed(doc, face).ok()?;
+    let base = doc.get(font).as_dict().and_then(|d| d.name(b"BaseFont").map(|n| String::from_utf8_lossy(n).into_owned()))?;
+    let mut name = base.clone();
+    let mut n = 1u32;
+    while fonts.contains(name.as_bytes()) {
+        n = n.saturating_add(1);
+        name = format!("{base}{n}");
+    }
+    fonts.set(name.as_bytes().to_vec(), Object::Ref(font));
+    dr.set(b"Font".to_vec(), Object::Dict(fonts));
+    af.set(b"DR".to_vec(), Object::Dict(dr));
+    doc.set(af_ref, Object::Dict(af));
+    Some((name, font))
+}
+
+/// Point the `/DA` of the field (and of the widget, when it has its own) at `font`, keeping the
+/// size and colour.
+fn set_da_font(doc: &mut Document, f: &Field, w: &Widget, da: &Da, font: &str) {
+    let new = PdfString::text(&format!("/{font} {} Tf {}", n(da.size), da.color));
+    let _ = doc.update_dict(f.obj, |d| d.set(b"DA".to_vec(), new.clone()));
+    if w.obj != f.obj && doc.get(w.obj).as_dict().is_some_and(|d| d.contains(b"DA")) {
+        let _ = doc.update_dict(w.obj, |d| d.set(b"DA".to_vec(), new));
+    }
+}
+
+/// [`field_appearance_drawn`], and whether the text drawn is cut off by the box.
+fn field_appearance_fit(doc: &Document, f: &Field, w: &Widget, values: &[String], format: bool) -> (Stream, Option<char>, Option<Overflow>) {
+    let (values, text) = shown_values(f, values, format);
+    let values = &values[..];
+    let wobj = doc.get(w.obj);
+    let wd = wobj.as_dict().cloned().unwrap_or_default();
+    let (page_w, page_h) = ((w.rect[2] - w.rect[0]).max(1.0), (w.rect[3] - w.rect[1]).max(1.0));
+    let place = placement(mk_rotation(doc, &wd), page_w, page_h);
+    let (width, height) = (place.layout_w, place.layout_h);
+    let da = widget_da(doc, f, &wd);
+    let strings = shown_strings(f, &text);
+    let (font_name, font_obj, enc) = match dr_font(doc, &da.font).filter(|(_, enc)| strings.iter().all(|s| enc.can_encode(s))) {
         Some((o, enc)) => (da.font.clone(), o, enc),
         None => ("Helv".to_string(), helvetica(), FontText::WinAnsi),
     };
     let width_of = |text: &str, size: f64| enc.width(text, size);
+    let (ascent, descent) = enc.vertical();
     let (mut c, bw) = frame(doc, &wd, width, height);
     let pad = 2.0 + bw;
     let inner_w = (width - 2.0 * pad).max(1.0);
@@ -786,11 +992,18 @@ fn field_appearance_fit(doc: &Document, f: &Field, w: &Widget, values: &[String]
     let mut body: Vec<u8> = Vec::new();
     // The first character drawn that the font can't hold (drawn as `?`), for the caller to report.
     let mut unencodable: Option<char> = None;
-    let mut show = |body: &mut Vec<u8>, x: f64, y: f64, text: &str| {
+    let mut show = |body: &mut Vec<u8>, x: f64, y: f64, text: &str, size: f64| {
         // A line break in a single-line value is a space, as in viewers (multiline text is split).
         let text: String = text.chars().map(|c| if matches!(c, '\n' | '\r') { ' ' } else { c }).collect();
         if unencodable.is_none() {
             unencodable = enc.first_unencodable(&text);
+        }
+        if let FontText::Thai(face) = &enc {
+            body.extend(format!("1 0 0 1 {} {} Tm\n", n(x), n(y)).bytes());
+            if let Ok(run) = thai::shape(face, &text) {
+                body.extend(thai::show(&run, &text, size));
+            }
+            return;
         }
         body.extend(format!("1 0 0 1 {} {} Tm ", n(x), n(y)).bytes());
         body.extend(literal(&enc.encode(&text)));
@@ -821,7 +1034,7 @@ fn field_appearance_fit(doc: &Document, f: &Field, w: &Widget, values: &[String]
                 if values.contains(export) {
                     c.push_str(&format!("0.6 0.75 0.86 rg\n{} {} {} {} re f\n", n(bw), n(y - line), n(width - 2.0 * bw), n(line)));
                 }
-                show(&mut body, pad, y - line + size * 0.25, display);
+                show(&mut body, pad, y - line + size * 0.25, display, size);
                 y -= line;
             }
         }
@@ -829,20 +1042,27 @@ fn field_appearance_fit(doc: &Document, f: &Field, w: &Widget, values: &[String]
             let comb = f.is_comb();
             if f.kind == FieldKind::Text && f.has(flags::MULTILINE) {
                 if size == 0.0 {
-                    size = auto_text_size(&text, inner_w, height - 2.0 * pad, true, width_of);
+                    // Measured as it is drawn (for Thai: shaped widths and Thai word breaks).
+                    size = auto_text_size_by(
+                        inner_w,
+                        height - 2.0 * pad,
+                        true,
+                        |size| width_of(&text, size),
+                        |size| enc.wrap(&text, size, inner_w).len() as f64 * size * 1.15,
+                    );
                 }
-                let mut y = height - pad - size * 0.85;
-                let lines = wrap_with(&text, size, inner_w, width_of);
+                let mut y = height - pad - enc.first_baseline(size, pad);
+                let lines = enc.wrap(&text, size, inner_w);
                 // The lines whose descent stays inside the border; the rest are cut off.
                 let mut room = 0;
                 for line in &lines {
                     if y < -size {
                         break;
                     }
-                    if y - 0.207 * size >= bw - 0.01 {
+                    if y - descent * size >= bw - 0.01 {
                         room += 1;
                     }
-                    show(&mut body, x_for(line, size), y, line);
+                    show(&mut body, x_for(line, size), y, line, size);
                     y -= size * 1.15;
                 }
                 if room < lines.len() {
@@ -859,27 +1079,27 @@ fn field_appearance_fit(doc: &Document, f: &Field, w: &Widget, values: &[String]
                         auto_text_size(&text, inner_w, height - 2.0 * pad, false, width_of)
                     };
                 }
-                // Centre Helvetica's ascent (0.718) and descent (0.207) vertically.
-                let y = (height - 0.925 * size) / 2.0 + 0.207 * size;
+                // Centre the font's ascent and descent vertically (Helvetica's: 0.718 and 0.207).
+                let y = (height - (ascent + descent) * size) / 2.0 + descent * size;
                 // The clip box is inside the border; a line taller than it is cut at the top and bottom.
                 let room_h = height - 2.0 * bw;
-                if 0.925 * size > room_h + 0.01 {
-                    overflow = Some(Overflow::High { height: 0.925 * size, room: room_h, size });
+                if (ascent + descent) * size > room_h + 0.01 {
+                    overflow = Some(Overflow::High { height: (ascent + descent) * size, room: room_h, size });
                 }
                 if comb {
                     let cells = f.max_len.unwrap_or(1).max(1);
                     let cell = width / cells as f64;
                     c.push_str(&comb_dividers(doc, &wd, width, height, cells));
-                    for (i, ch) in text.chars().take(cells).enumerate() {
-                        let s = ch.to_string();
-                        show(&mut body, cell * i as f64 + (cell - width_of(&s, size)) / 2.0, y, &s);
+                    // One grapheme cluster per cell (ที่ fills one), as `/MaxLen` counts them.
+                    for (i, s) in text.graphemes(true).take(cells).enumerate() {
+                        show(&mut body, cell * i as f64 + (cell - width_of(s, size)) / 2.0, y, s, size);
                     }
                 } else {
                     let tw = width_of(&text.replace(['\n', '\r'], " "), size);
                     if overflow.is_none() && tw > inner_w + 0.01 {
                         overflow = Some(Overflow::Wide { width: tw, room: inner_w, size });
                     }
-                    show(&mut body, x_for(&text, size), y, &text);
+                    show(&mut body, x_for(&text, size), y, &text, size);
                 }
             }
         }
