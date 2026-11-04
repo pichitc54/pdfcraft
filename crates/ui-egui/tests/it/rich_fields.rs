@@ -118,6 +118,42 @@ fn the_format_panel_formats_the_selection_and_keeps_the_field_open() {
     assert_eq!(runs(&h, "city"), [("Lyon".to_string(), false, false, false, true)]);
 }
 
+/// The committed rich value's runs as (text, size).
+fn sizes(h: &Harness<'static, PdfCraftApp>, name: &str) -> Vec<(String, Option<f64>)> {
+    let f = field(h, name);
+    let Some(rv) = f.rich_value() else { return Vec::new() };
+    rv.paragraphs.iter().flat_map(|p| &p.runs).map(|r| (r.text.clone(), r.style.size)).collect()
+}
+
+/// A person's click: hover, press and release at `at`.
+fn click_at(h: &mut Harness<'static, PdfCraftApp>, at: egui::Pos2) {
+    h.hover_at(at);
+    h.run_steps(1);
+    h.drag_at(at);
+    h.run_steps(1);
+    h.drop_at(at);
+    h.run_steps(3);
+}
+
+#[test]
+fn a_size_typed_into_the_format_panel_sizes_the_selection() {
+    let mut h = harness();
+    click_field(&mut h, "city");
+    type_text(&mut h, "ราคา");
+    chord(&mut h, Key::A);
+    let at = h.get_by_label("Font size:").rect().center();
+    click_at(&mut h, egui::pos2(at.x, at.y));
+    chord(&mut h, Key::A);
+    type_text(&mut h, "9");
+    h.key_press(Key::Enter);
+    h.run_steps(4);
+    assert!(h.state().views[0].forms.focus.is_some(), "the field is still being filled");
+    // The keyboard is back in the field, so Enter commits it.
+    h.key_press(Key::Enter);
+    h.run_steps(4);
+    assert_eq!(sizes(&h, "city"), [("ราคา".to_string(), Some(9.0))]);
+}
+
 fn panel(h: &Harness<'static, PdfCraftApp>) -> egui::Rect {
     h.state().views[0].forms.focus.as_ref().and_then(|f| f.panel_rect).expect("the panel shows")
 }

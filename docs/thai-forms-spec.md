@@ -147,6 +147,7 @@ Full user stories, decisions and test seams: issue pichitc54/pdfcraft#1. Upstrea
 - A Latin word set in Times inside a Thai value: the Latin in Times, the Thai beside it in Sarabun.
 - A malformed `/RV` opens showing the plain `/V`, without a crash.
 - ⌘B on a selection in an ordinary (not rich-text) field does nothing.
+- With words selected in a rich-text field, typing 9 into the Format text panel's size box and pressing Enter sizes those words 9 pt (the box takes the keyboard, and the field's selection is kept for it). The list names the field's own font (Sarabun, Angsana New) for text without a family of its own.
 
 Test seams: the engine's set-field-value edit / form-fill tool (what lands in the PDF) and the UI harness (editor and panel behaviour).
 
