@@ -198,6 +198,7 @@ impl PrintDraft {
             content: self.content,
             raster: self.as_image.then_some(print::Raster { dpi: self.dpi, grayscale: self.grayscale }),
             crops: self.crops.clone(),
+            turn_mixed: false,
         })
     }
 

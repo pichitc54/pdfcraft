@@ -9,7 +9,8 @@ use super::{DecodeBudget, Dict, Document, Matrix, Object};
 /// portrait (`Letter`), and without this option CUPS leaves a landscape sheet unrotated and
 /// shrinks it into the portrait paper instead of turning it to fill it (#2713). It is a property
 /// of the whole job, so it is given only when *every* sheet is landscape; a job that mixes
-/// orientations is left to the spooler, as portrait sheets would be turned wrongly.
+/// orientations gets none, as portrait sheets would be turned wrongly. With
+/// [`Settings::turn_mixed`] such a job is laid out on portrait sheets alone instead.
 pub fn cups_orientation(sheets: &[Sheet]) -> Option<(String, String)> {
     let landscape = !sheets.is_empty() && sheets.iter().all(|s| s.size.0 > s.size.1);
     landscape.then(|| ("orientation-requested".to_string(), "4".to_string()))
@@ -171,10 +172,15 @@ pub fn layout(sizes: &[(f64, f64)], settings: &Settings) -> Result<Vec<Sheet>, P
     let mut sheets = Vec::new();
     match settings.layout {
         Layout::Size(mode) => {
+            let turn_mixed = settings.turn_mixed
+                && settings.orientation == Orientation::Auto
+                && pages.iter().any(|&p| sizes[p].0 - sizes[p].1 > 1.0)
+                && pages.iter().any(|&p| sizes[p].1 - sizes[p].0 > 1.0);
             for &p in &pages {
                 let d = sizes[p];
-                let size = oriented(paper, settings.orientation, d.0 > d.1);
-                let fit = fit_scale(d, (size.0 - 2.0 * MARGIN, size.1 - 2.0 * MARGIN));
+                let rotate = turn_mixed && d.0 - d.1 > 1.0;
+                let size = oriented(paper, settings.orientation, d.0 > d.1 && !turn_mixed);
+                let fit = fit_scale(if rotate { (d.1, d.0) } else { d }, (size.0 - 2.0 * MARGIN, size.1 - 2.0 * MARGIN));
                 let s = match mode {
                     SizeMode::Fit => fit,
                     SizeMode::Actual => 1.0,
@@ -182,7 +188,7 @@ pub fn layout(sizes: &[(f64, f64)], settings: &Settings) -> Result<Vec<Sheet>, P
                     SizeMode::Custom(pct) if pct.is_finite() && pct > 0.0 => pct / 100.0,
                     SizeMode::Custom(_) => return Err(PrintError::Invalid("the scale must be more than 0%".into())),
                 };
-                sheets.push(Sheet { size, placed: vec![place_in(p, d, [0.0, 0.0, size.0, size.1], s, false)], ..Sheet::default() });
+                sheets.push(Sheet { size, placed: vec![place_in(p, d, [0.0, 0.0, size.0, size.1], s, rotate)], ..Sheet::default() });
             }
         }
         Layout::Label { flip } => {

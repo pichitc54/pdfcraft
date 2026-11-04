@@ -535,6 +535,44 @@ fn landscape_sheets_ask_cups_to_turn_the_page() {
     assert!(lp_args(&job).join(" ").ends_with("-o fit-to-page=false -o orientation-requested=4"));
 }
 
+/// `orientation-requested` turns a whole job, so for CUPS a job that mixes orientations keeps every
+/// sheet portrait and turns its landscape pages onto them instead; every other job is as before.
+#[test]
+fn a_mixed_job_turns_its_landscape_pages_onto_portrait_sheets() {
+    let sizes = [(595.0, 842.0), (842.0, 595.0)];
+    let job = |turn_mixed| Settings { turn_mixed, ..settings(vec![0, 1], Layout::Size(SizeMode::Fit)) };
+
+    let sheets = layout(&sizes, &job(true)).unwrap();
+    assert!(sheets.iter().all(|s| s.size.0 < s.size.1), "every sheet is portrait: {:?}", sheets.iter().map(|s| s.size).collect::<Vec<_>>());
+    let [a, b, ..] = sheets[1].placed[0].matrix.0;
+    assert!(a.abs() < 1e-9 && b.abs() > 0.1, "the landscape page is turned a quarter: {a} {b}");
+    let placement = sheets[1].placed[0];
+    let [x0, y0, x1, y1] = placement.matrix.bbox(placement.clip);
+    let size = sheets[1].size;
+    assert!(
+        x0 >= MARGIN - 0.01 && y0 >= MARGIN - 0.01 && x1 <= size.0 - MARGIN + 0.01 && y1 <= size.1 - MARGIN + 0.01,
+        "inside the margins: {:?}",
+        [x0, y0, x1, y1]
+    );
+    let [a, b, ..] = sheets[0].placed[0].matrix.0;
+    assert!(b == 0.0 && a > 0.0, "the portrait page is not turned");
+    assert_eq!(cups_orientation(&sheets), None, "all-portrait sheets need no option");
+
+    let as_is = layout(&sizes, &job(false)).unwrap();
+    assert!(as_is[1].size.0 > as_is[1].size.1, "without the flag the landscape page gets a landscape sheet");
+
+    let landscape = layout(&[(842.0, 595.0); 2], &job(true)).unwrap();
+    assert!(landscape.iter().all(|s| s.size.0 > s.size.1), "an all-landscape job keeps landscape sheets");
+    assert_eq!(cups_orientation(&landscape), Some(("orientation-requested".to_string(), "4".to_string())));
+
+    let square = layout(&[(595.0, 842.0), (600.0, 600.5)], &job(true)).unwrap();
+    assert!(square.iter().all(|s| s.size.0 < s.size.1), "a near-square page is neither orientation");
+    assert_eq!(square[1].placed[0].matrix.0[1], 0.0, "and is not turned");
+
+    let forced = Settings { orientation: Orientation::Landscape, ..job(true) };
+    assert!(layout(&sizes, &forced).unwrap().iter().all(|s| s.size.0 > s.size.1), "a chosen orientation is kept");
+}
+
 /// Both submission paths add the orientation through `add_cups_orientation`: after the job's
 /// other options, never over an orientation the job already names (a driver choice), so `lp` is
 /// never given it twice, and not on Windows, whose print ticket sets it.

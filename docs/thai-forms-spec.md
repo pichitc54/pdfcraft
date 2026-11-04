@@ -210,18 +210,20 @@ Not Thai-specific, but part of the fork so every rebuild carries it. Upstream fi
 
 Last seen in (v0.18.0): `ui-egui/src/tools/comments/state.rs` (`PageCx::screen_rects`: no `/Rect` fallback for markup whose `/Rect` covers the page); test `tools/comments/tests.rs` `a_markup_comment_without_quads_is_not_under_the_pointer`.
 
-## I. Landscape printing on macOS (upstream PR, carried until merged)
+## I. Landscape printing on macOS
 
 Not Thai-specific. On macOS, a landscape print sheet went to CUPS without an orientation, and Apple's filter put it on portrait paper unrotated, at 100%, cut off at the paper's right edge (storytold/pdfcraft#3739, #2713): the user's A4 landscape SSO form on the HP Smart Tank came out that way.
 
 ### Rules
 
-- The fork carries upstream PR storytold/pdfcraft#4763 as written: when every sheet of a job is landscape, the job asks CUPS for `orientation-requested=4` (the Print dialog and `doc_print` alike), unless the job already names an orientation. A job mixing portrait and landscape sheets is left as upstream sends it.
-- **Drop this area on the first rebuild whose upstream release contains #4763** (check `git grep -n cups_orientation <tag> -- crates/print`).
+- The fork carries upstream PR storytold/pdfcraft#4763 as written: when every sheet of a job is landscape, the job asks CUPS for `orientation-requested=4` (the Print dialog and `doc_print` alike), unless the job already names an orientation. A job mixing portrait and landscape sheets can't use that option (it turns the whole job), so the fork lays it out differently: when it goes to a CUPS printer (not Save as PDF, not the browser, not Windows) with Orientation Auto in a Size layout (Fit, Actual size, Shrink, Custom), every sheet stays portrait and each landscape page is turned a quarter onto it (`Settings::turn_mixed`). The preview still shows the landscape sheets.
+- **Drop only the #4763 part** on the first rebuild whose upstream release contains it (check `git grep -n cups_orientation <tag> -- crates/print`); keep the mixed-job rule unless upstream has its own per-sheet turning by then.
 
 ### Acceptance examples
 
 - macOS's own filter (`cupsfilter -p <the printer's PPD> -o media=A4 -o fit-to-page=false -o orientation-requested=4 -m image/pwg-raster`) turns the A4 landscape page to fit A4 portrait (ink x 21–387, y 28–819 pt), where without the option it lay unrotated off the right edge (x 23–595, y 268–634).
+- A two-page job (an A4 portrait receipt page, then the A4 landscape SSO form) spooled with `turn_mixed` and run through the HP's filter prints both pages on A4 portrait: page 1 ink x 38–382, y 51–795 pt; page 2 (turned) x 65–520, y 78–780.
+- Fork tests: `print` `a_mixed_job_turns_its_landscape_pages_onto_portrait_sheets`, `automation` `a_mixed_job_to_a_printer_asks_for_no_orientation`, `ui-egui` `print::a_mixed_job_prints_its_landscape_pages_turned`.
 - Upstream's tests: `print` `landscape_sheets_ask_cups_to_turn_the_page`, `a_job_that_names_its_orientation_keeps_it`; `automation` `printing_landscape_sheets_to_a_printer_asks_cups_to_turn_them`; `ui-egui` `print::printing_landscape_sheets_tells_cups_to_turn_them`.
 
 Last seen in (v0.18.0): `print/src/sheets.rs` (`cups_orientation`, `add_cups_orientation`), `ui-egui/src/workflows/print_ui.rs`, `automation/src/printing.rs`.
