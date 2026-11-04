@@ -31,7 +31,7 @@ fn close(h: &mut Harness<'static, PdfCraftApp>) {
 }
 
 fn card(h: &Harness<'static, PdfCraftApp>) -> Rect {
-    h.ctx.data(|d| d.get_temp::<Rect>(egui::Id::new("dialog").with("card"))).expect("a dialog is shown")
+    h.ctx.data(|d| d.get_temp::<Rect>(egui::Id::unique("dialog").with("card"))).expect("a dialog is shown")
 }
 
 /// Press at `from`, move by `by` in a few steps, release.
