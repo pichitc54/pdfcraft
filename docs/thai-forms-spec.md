@@ -12,7 +12,7 @@ Status: written 2026-10-28 for the rebuild on v0.14.0, from the v0.9.0 fork (com
    - ADR 0001: Thai field values are drawn in Sarabun, found at runtime first and embedded whole as a real TrueType font, so other viewers can redraw the field.
    - ADR 0002: Edit text may embed fonts installed on this Mac when their OS/2 `fsType` allows it.
 4. **Upstream's repo rules still apply**: never panic, quality gates, scoped builds. Its font rule (only open-licensed fonts from craft-fonts may enter a PDF) does not (ADRs 0001, 0002).
-5. **Each area ships on its own**, in the order A → B → C → D → E → F → G → H.
+5. **Each area ships on its own**, in the order A → B → C → D → E → F → G → H → I.
 
 ## Rebuild playbook
 
@@ -209,6 +209,22 @@ Not Thai-specific, but part of the fork so every rebuild carries it. Upstream fi
 - An Underline with no quads and a `/Rect` of ±32768 is found nowhere on the page; one with a quad over a word is found on that word and nowhere else; a Highlight with no quads and an ordinary `/Rect` is still found inside that `/Rect` (upstream's test).
 
 Last seen in (v0.18.0): `ui-egui/src/tools/comments/state.rs` (`PageCx::screen_rects`: no `/Rect` fallback for markup whose `/Rect` covers the page); test `tools/comments/tests.rs` `a_markup_comment_without_quads_is_not_under_the_pointer`.
+
+## I. Landscape printing on macOS (upstream PR, carried until merged)
+
+Not Thai-specific. On macOS, a landscape print sheet went to CUPS without an orientation, and Apple's filter put it on portrait paper unrotated, at 100%, cut off at the paper's right edge (storytold/pdfcraft#3739, #2713): the user's A4 landscape SSO form on the HP Smart Tank came out that way.
+
+### Rules
+
+- The fork carries upstream PR storytold/pdfcraft#4763 as written: when every sheet of a job is landscape, the job asks CUPS for `orientation-requested=4` (the Print dialog and `doc_print` alike), unless the job already names an orientation. A job mixing portrait and landscape sheets is left as upstream sends it.
+- **Drop this area on the first rebuild whose upstream release contains #4763** (check `git grep -n cups_orientation <tag> -- crates/print`).
+
+### Acceptance examples
+
+- macOS's own filter (`cupsfilter -p <the printer's PPD> -o media=A4 -o fit-to-page=false -o orientation-requested=4 -m image/pwg-raster`) turns the A4 landscape page to fit A4 portrait (ink x 21–387, y 28–819 pt), where without the option it lay unrotated off the right edge (x 23–595, y 268–634).
+- Upstream's tests: `print` `landscape_sheets_ask_cups_to_turn_the_page`, `a_job_that_names_its_orientation_keeps_it`; `automation` `printing_landscape_sheets_to_a_printer_asks_cups_to_turn_them`; `ui-egui` `print::printing_landscape_sheets_tells_cups_to_turn_them`.
+
+Last seen in (v0.18.0): `print/src/sheets.rs` (`cups_orientation`, `add_cups_orientation`), `ui-egui/src/workflows/print_ui.rs`, `automation/src/printing.rs`.
 
 ## Out of scope
 
