@@ -219,10 +219,22 @@ fn value_for(f: &FormField, v: &Value) -> Result<FieldValue> {
             a.iter().map(|x| x.as_str().map(str::to_owned).ok_or_else(|| wrong("list values must be strings"))).collect::<Result<_>>()?,
         ),
         (FormFieldKind::Combo | FormFieldKind::List, Value::String(s)) => FieldValue::Choice(if s.is_empty() { Vec::new() } else { vec![s.clone()] }),
+        // A rich value: `{"rich": "<body>…</body>"}`, the XHTML of ISO 32000-2 §12.7.4.3.
+        (FormFieldKind::Text, Value::Object(o)) if o.len() == 1 && o.contains_key("rich") => {
+            let xhtml = o.get("rich").and_then(Value::as_str).ok_or_else(|| wrong("rich must be an XHTML string"))?;
+            if xhtml.len() > pdfcraft_engine::form_rich::MAX_RV_BYTES {
+                return Err(wrong("the rich value is too large"));
+            }
+            FieldValue::Rich(pdfcraft_engine::form_rich::parse(xhtml).ok_or_else(|| wrong("the rich value is not readable XHTML"))?)
+        }
         (_, Value::String(s)) => FieldValue::Text(s.clone()),
         (_, Value::Number(n)) => FieldValue::Text(n.to_string()),
         (_, Value::Bool(b)) => FieldValue::Text(b.to_string()),
-        _ => return Err(wrong("use a string (text, radio option, choice), true/false (check box) or an array (multi-select list)")),
+        _ => {
+            return Err(wrong(
+                "use a string (text, radio option, choice), {\"rich\": \"<body>…</body>\"} (rich text field), true/false (check box) or an array (multi-select list)",
+            ));
+        }
     })
 }
 
@@ -258,6 +270,9 @@ impl Automation {
                 let o = &mut more;
                 if let Some(t) = &f.tooltip {
                     o.insert("tooltip".into(), json!(t));
+                }
+                if let Some(rv) = f.rich_value() {
+                    o.insert("rich".into(), json!(rv.to_xhtml()));
                 }
                 if let Some(s) = doc.field_check_style(&f.name) {
                     o.insert("check_style".into(), json!(s.label().to_lowercase()));
