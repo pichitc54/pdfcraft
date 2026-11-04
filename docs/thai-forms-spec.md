@@ -12,7 +12,7 @@ Status: written 2026-10-28 for the rebuild on v0.14.0, from the v0.9.0 fork (com
    - ADR 0001: Thai field values are drawn in Sarabun, found at runtime first and embedded whole as a real TrueType font, so other viewers can redraw the field.
    - ADR 0002: Edit text may embed fonts installed on this Mac when their OS/2 `fsType` allows it.
 4. **Upstream's repo rules still apply**: never panic, quality gates, scoped builds. Its font rule (only open-licensed fonts from craft-fonts may enter a PDF) does not (ADRs 0001, 0002).
-5. **Each area ships on its own**, in the order A → B → C → D → E → F → G.
+5. **Each area ships on its own**, in the order A → B → C → D → E → F → G → H.
 
 ## Rebuild playbook
 
@@ -195,6 +195,20 @@ Not Thai-specific, but part of the fork so every rebuild carries it. Upstream's 
 - Help ▸ Check for updates shows the personal-build notice, calls no source, and offers no Download.
 
 Last seen in (v0.18.0): `ui-egui/src/platform/updates.rs` (`set_startup_update_check` keeps the check off; `check_for_updates`, `FORK_NOTICE`). Upstream's update tests are replaced by the fork's in `ui-egui/tests/it/updates.rs`.
+
+## H. Text markup without quads
+
+Not Thai-specific, but part of the fork so every rebuild carries it. Upstream finds a highlight, underline, strikeout or squiggly by its quads, and one without any by its `/Rect`. The user's receipts carry an Acrobat leftover from 2019: an Underline with an empty `QuadPoints` and a `/Rect` of ±32768, so PdfCraft showed its author ("pichitc") at the pointer anywhere on the page.
+
+### Rules
+
+- Text markup is under the pointer where its quads are. One without quads keeps upstream's fallback to its `/Rect` (#3541), unless that `/Rect` covers the whole page: then it marks nothing in particular, so hovering shows nothing and clicking on the page doesn't select it. It is still listed in the Comments panel, where it can be deleted.
+
+### Acceptance examples
+
+- An Underline with no quads and a `/Rect` of ±32768 is found nowhere on the page; one with a quad over a word is found on that word and nowhere else; a Highlight with no quads and an ordinary `/Rect` is still found inside that `/Rect` (upstream's test).
+
+Last seen in (v0.18.0): `ui-egui/src/tools/comments/state.rs` (`PageCx::screen_rects`: no `/Rect` fallback for markup whose `/Rect` covers the page); test `tools/comments/tests.rs` `a_markup_comment_without_quads_is_not_under_the_pointer`.
 
 ## Out of scope
 
