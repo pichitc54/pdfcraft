@@ -384,10 +384,12 @@ fn group_layout(lines: &[TextLine], mixed: bool) -> Vec<TextBlock> {
             block.invisible &= line.origin.state.render_mode == 3;
             block.lines.push(index);
         }
+        let thai = |c: Option<char>| c.is_some_and(|c| ('\u{0e00}'..='\u{0e7f}').contains(&c));
         if !block.text.is_empty() {
             if block.text.ends_with('-') {
                 block.text.pop();
-            } else {
+            } else if !(thai(block.text.chars().last()) && thai(row_text.trim_start().chars().next())) {
+                // Thai wraps between words without a space: rows join directly.
                 block.text.push(' ');
             }
         }

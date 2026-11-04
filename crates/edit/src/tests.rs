@@ -10468,3 +10468,6 @@ fn review_inside_scope_group_move_matches_direct_transform_under_outer_scale() {
         }
     }
 }
+
+#[path = "thai_tests.rs"]
+mod thai;

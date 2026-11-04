@@ -76,6 +76,21 @@ impl FontResolver<'_> {
         self.embed_face(key, &bytes, &family, "the source font could not be loaded").map(Some)
     }
 
+    /// The Thai document face for `source`'s style, embedded once per edit (the paragraph is set
+    /// in Sarabun, ADR 0002).
+    fn sarabun_font(&mut self, faces: &pdfcraft_fonts::thai::ThaiFaces, source: &TextLine) -> Result<String, EditError> {
+        let face = faces.for_style(source.bold, source.italic);
+        self.embed_face(format!("sarabun:{:?}", face.style), &face.bytes, &face.family, "the Thai document font could not be loaded")
+    }
+
+    /// The full copy of `source`'s face installed on this computer (`pdfcraft_fonts::installed`,
+    /// ADR 0002) that may be embedded and covers `text`, embedded whole once per edit. `None` when
+    /// there is none.
+    fn installed_font(&mut self, source: &TextLine, text: &str) -> Result<Option<String>, EditError> {
+        let Some(face) = pdfcraft_fonts::installed::index().and_then(|index| index.find(&source.base_font, text).ok()) else { return Ok(None) };
+        self.embed_face(format!("installed:{}", face.path.display()), &face.bytes, &face.family, "the installed font could not be loaded").map(Some)
+    }
+
     fn embed_face(&mut self, key: String, bytes: &[u8], family: &str, missing_message: &str) -> Result<String, EditError> {
         if let Some(name) = self.full_faces.get(&key) {
             return Ok(name.clone());
@@ -119,11 +134,15 @@ struct CharacterPreparation<'a> {
     fonts: &'a mut Dict,
     metrics: &'a mut std::collections::BTreeMap<String, Metrics>,
     max_glyphs: usize,
+    /// Set the whole paragraph in the Thai document face (see `thai_fallback`).
+    sarabun: Option<&'static pdfcraft_fonts::thai::ThaiFaces>,
+    /// The draft needs shaping (Thai, …), so a run is drawn whole by one full face.
+    shaping: bool,
 }
 
 impl CharacterPreparation<'_> {
     fn prepare(self) -> Result<PreparedCharacters, EditError> {
-        let Self { doc, first, lines, draft, spans, style, overrides, fonts, metrics, max_glyphs } = self;
+        let Self { doc, first, lines, draft, spans, style, overrides, fonts, metrics, max_glyphs, sarabun, shaping } = self;
         let mut chars = Vec::new();
         let mut substituted = None;
         let mut fallback = FallbackBuilder::new(max_glyphs);
@@ -143,7 +162,18 @@ impl CharacterPreparation<'_> {
                 }
                 let text = ch.to_string();
                 let requested = overrides.get(&index).and_then(|range| range.resource.as_deref()).or(style.resource.as_deref());
-                let name = if let Some(name) = resolver.encodable_font(source, &text, requested)? {
+                let name = if requested.is_none()
+                    && let Some(faces) = sarabun
+                {
+                    resolver.sarabun_font(faces, source)?
+                } else if requested.is_none()
+                    && shaping
+                    && let Some(name) = resolver.installed_font(source, draft)?
+                {
+                    // A full copy of the source face installed on this computer draws the whole
+                    // run, so Thai clusters are never split between it and the PDF's subset.
+                    name
+                } else if let Some(name) = resolver.encodable_font(source, &text, requested)? {
                     name
                 } else if needs_type3(&text) {
                     fallback.prepare(source, ch, &text, chars.len())?
@@ -282,6 +312,7 @@ fn validate_contextual_rows(rows: &[Vec<StyledChar>], kept: &[bool]) -> Result<(
         let text: String = row.iter().map(|character| character.0).collect();
         if pdfcraft_fonts::source_shaping::required(&text)
             && row.first().is_some_and(|first| row.iter().any(|character| character.1 != first.1 || character.2 != first.2))
+            && !splits_only_between_clusters(row, &text)
         {
             return Err(EditError::Invalid(
                 "contextual/bidi text across font or style boundaries needs a uniform full-face row; mixed contextual runs are not yet supported"
@@ -403,9 +434,14 @@ fn paragraph_geometry(doc: &Document, page: &pdfcraft_model::Page, block: &TextB
 
 type WrappedStyledRows = (StyledRows, RowRanges, Vec<usize>, Vec<bool>, Vec<usize>);
 
+/// `chars` wrapped into rows: row `r` holds `room(r)` points of text, each word measured by
+/// `measure` and scaled by `fit` (a condensed edit). Words end at spaces, at `breaks` (Thai word
+/// boundaries, as character indexes) and where Chinese or Japanese text may break.
 fn wrap_styled_rows(
     chars: &[StyledChar],
-    width: f64,
+    room: impl Fn(usize) -> f64,
+    breaks: &std::collections::HashSet<usize>,
+    fit: f64,
     measure: impl Fn(&[StyledChar]) -> Result<f64, EditError>,
 ) -> Result<WrappedStyledRows, EditError> {
     let mut rows: Vec<Vec<StyledChar>> = Vec::new();
@@ -447,17 +483,19 @@ fn wrap_styled_rows(
         }
         let mut end = at + 1;
         if !item.0.is_whitespace() {
-            // A word ends at a space, or where Chinese or Japanese text may break between characters.
+            // A word ends at a space, at a Thai word boundary, or where Chinese or Japanese text
+            // may break between characters.
             while let (Some(before), Some(current)) = (chars.get(end - 1), chars.get(end))
                 && !current.0.is_whitespace()
+                && !breaks.contains(&end)
                 && !crate::linebreak::between(before.0, current.0)
             {
                 end += 1;
             }
         }
         let word = chars.get(at..end).unwrap_or_default();
-        let word_width = measure(word)?;
-        if !row.is_empty() && !item.0.is_whitespace() && row_width + word_width > width + 0.5 {
+        let word_width = measure(word)? * fit;
+        if !row.is_empty() && !item.0.is_whitespace() && row_width + word_width > room(rows.len()) + 0.5 {
             let mut trimmed = 0usize;
             while row.last().is_some_and(|c: &StyledChar| c.0.is_whitespace()) {
                 row.pop();
@@ -565,6 +603,70 @@ fn apply_range_styles<'a>(
         }
     }
     StyledLines { lines: styled_lines, spans: styled_spans, underlines, overrides }
+}
+
+/// The narrowest a Thai edit is condensed to before it wraps onto a new line instead.
+const MIN_FIT: f64 = 0.8;
+
+/// Whether a left-to-right row changes font or style only between grapheme clusters: each run is
+/// then shaped on its own without breaking a cluster (Thai with a bold word). Right-to-left and
+/// bidi rows, and a change inside a cluster, still need one uniform face.
+fn splits_only_between_clusters(row: &[(char, usize, String)], text: &str) -> bool {
+    use unicode_segmentation::UnicodeSegmentation as _;
+    if text.chars().any(|c| matches!(u32::from(c), 0x0590..=0x08ff | 0xfb1d..=0xfeff | 0x200e..=0x200f | 0x202a..=0x202e | 0x2066..=0x2069)) {
+        return false;
+    }
+    // Character index where each grapheme cluster starts.
+    let mut starts = std::collections::HashSet::new();
+    let mut chars_before = 0;
+    for g in text.graphemes(true) {
+        starts.insert(chars_before);
+        chars_before += g.chars().count();
+    }
+    row.windows(2).enumerate().all(|(i, w)| (w[0].1 == w[1].1 && w[0].2 == w[1].2) || starts.contains(&(i + 1)))
+}
+
+/// The Thai document faces, and the source fonts (without subset prefix) that can't draw the
+/// edit, when `draft` is Thai that some run of `block` can't draw with its own font (its encoding
+/// or its complete program), an installed full face or an approved one, and the installed Thai document face covers all of it.
+fn thai_fallback(
+    doc: &Document,
+    fonts: &Dict,
+    block: &TextBlock,
+    lines: &[TextLine],
+    draft: &str,
+    shaping: bool,
+) -> Option<(&'static pdfcraft_fonts::thai::ThaiFaces, Vec<String>)> {
+    if !shaping || !draft.chars().any(|c| ('\u{0e00}'..='\u{0e7f}').contains(&c)) {
+        return None;
+    }
+    let faces = pdfcraft_fonts::thai::installed_document_faces()?;
+    if !pdfcraft_fonts::thai::covers(&faces.regular, draft) {
+        return None;
+    }
+    let mut missing: Vec<String> = Vec::new();
+    for source in block.lines.iter().filter_map(|i| lines.get(*i)) {
+        let installed = pdfcraft_fonts::installed::index().is_some_and(|index| index.find(&source.base_font, draft).is_ok());
+        let approved = pdfcraft_fonts::embedding::matching_faces(&source.base_font).iter().any(|f| pdfcraft_fonts::embedding::covers(f.bytes, draft));
+        // The run's own font: its encoding, or its complete embedded program under the rule the
+        // row editor draws with (not a subset, and licensed for editing).
+        let own = fonts.get(source.font.as_bytes()).and_then(|f| doc.dict(f)).is_some_and(|f| source_encodes(&Metrics::from_dict(doc, &f), draft))
+            || source_program(doc, fonts, &source.font).is_some_and(|bytes| pdfcraft_fonts::embedding::covers(&bytes, draft));
+        let name = source.base_font.rsplit('+').next().unwrap_or(&source.base_font).to_owned();
+        if !(installed || approved || own) && !missing.contains(&name) {
+            missing.push(name);
+        }
+    }
+    (!missing.is_empty()).then_some((faces, missing))
+}
+
+/// The x-height (em) the page font `resource` declares in its font descriptor, if any.
+fn declared_x_height(doc: &Document, fonts: &Dict, resource: &str) -> Option<f64> {
+    let font = fonts.get(resource.as_bytes()).and_then(|f| doc.dict(f))?;
+    let descendant = font.get(b"DescendantFonts").and_then(|d| doc.resolve(d).as_array().and_then(|a| a.first().cloned())).and_then(|d| doc.dict(&d));
+    let descriptor = descendant.as_ref().unwrap_or(&font).get(b"FontDescriptor").and_then(|d| doc.dict(d))?;
+    let x = descriptor.get(b"XHeight").and_then(|x| doc.resolve(x).as_f64())?;
+    (x.is_finite() && x > 0.0 && x < 1000.0).then_some(x / 1000.0)
 }
 
 /// Shape in the source or an explicitly registered matching full face. Never use interface fonts.
@@ -852,8 +954,10 @@ pub(crate) fn rewrite_styled_block(
     let first = block.lines.first().and_then(|i| lines.get(*i)).ok_or_else(|| EditError::Invalid("the paragraph has no source runs".into()))?;
     let draft = replacement_text(block, text)?;
     if has_no_effective_style_change(block, draft, style) {
-        return Ok(LineEdit { substituted: None });
+        return Ok(LineEdit { substituted: None, notice: None });
     }
+    // Complex text (Thai, …) is shaped as a whole run: see `FontResolver::installed_font`.
+    let shaping = pdfcraft_fonts::source_shaping::required(draft);
     let ranges = validated_ranges(draft, style)?;
     let source_count = lines.len();
     let styled = apply_range_styles(first, block, lines, draft, &ranges, style);
@@ -865,6 +969,22 @@ pub(crate) fn rewrite_styled_block(
     let mut res = p.dict.get(b"Resources").and_then(|resource| doc.resolve(resource).as_dict().cloned()).unwrap_or_default();
     let (mut fonts, mut metrics) = page_font_metrics(doc, &res, block, lines);
     let (dx, dy, width) = paragraph_geometry(doc, &p, block, style)?;
+    // Thai that some run's font can't draw (its subset, an installed or approved full face): the
+    // whole paragraph is set in the Thai document face (ADR 0002), so it uses one family.
+    let sarabun = thai_fallback(doc, &fonts, block, lines, draft, shaping);
+    let mut notice = None;
+    // Per source run, the size factor that gives Sarabun the source's declared x-height.
+    let mut sarabun_scale: HashMap<usize, f64> = HashMap::new();
+    if let Some((faces, missing)) = &sarabun {
+        notice = Some(format!("Set in Sarabun: {} isn't installed on this computer", missing.join(", ")));
+        for &index in &block.lines {
+            let Some(source) = lines.get(index) else { continue };
+            let face = faces.for_style(source.bold, source.italic);
+            if let (Some(x_src), Some(x_sar)) = (declared_x_height(doc, &fonts, &source.font), pdfcraft_fonts::thai::x_height(face)) {
+                sarabun_scale.insert(index, (x_src / x_sar).clamp(0.5, 1.5));
+            }
+        }
+    }
     let prepared = CharacterPreparation {
         doc,
         first,
@@ -876,12 +996,15 @@ pub(crate) fn rewrite_styled_block(
         fonts: &mut fonts,
         metrics: &mut metrics,
         max_glyphs,
+        sarabun: sarabun.as_ref().map(|(faces, _)| *faces),
+        shaping,
     }
     .prepare()?;
     let chars = prepared.values;
     let substituted = prepared.substituted;
     let size_of = |source: &TextLine, index: usize| {
-        overrides.get(&index).and_then(|r| r.size).or(style.size).unwrap_or(source.size).max(0.1) / source.origin.k.max(1e-6)
+        let own = source.size * sarabun_scale.get(&index).copied().unwrap_or(1.0);
+        overrides.get(&index).and_then(|r| r.size).or(style.size).unwrap_or(own).max(0.1) / source.origin.k.max(1e-6)
     };
     // A source run may carry TJ kerning/justification that is absent from its text state.
     // Keep its measured advance when rebuilding the run instead of making it wrap on entry.
@@ -949,14 +1072,49 @@ pub(crate) fn rewrite_styled_block(
         }
         Ok(width)
     };
-    let (rows, row_ranges, row_lines, row_soft, row_gap) = wrap_styled_rows(&chars, width, measure)?;
+    // Thai has no spaces between words: it breaks at dictionary word boundaries. A one-line edit
+    // grows to the right like any other; a Thai paragraph of several lines that would need another
+    // is condensed instead (down to MIN_FIT), since a new row would land on the text below (ADR 0002).
+    let thai = draft.chars().any(|c| ('\u{0e00}'..='\u{0e7f}').contains(&c));
+    let breaks: std::collections::HashSet<usize> = if thai {
+        let all: String = chars.iter().map(|c| c.0).collect();
+        pdfcraft_fonts::thai::line_breaks(&all).into_iter().collect()
+    } else {
+        Default::default()
+    };
+    // The room on each row: a source row that starts to the right of the paragraph's left edge (a
+    // first line sharing its line with other text) only has the room up to the paragraph's right
+    // edge (grown, for a one-line paragraph).
+    let room = |row: usize| -> f64 {
+        if style.width.is_some() {
+            return width;
+        }
+        block.rows.get(row).and_then(|r| row_rect(r, lines)).map_or(width, |r| (block.rect[0] + width - r[0]).clamp(1.0, width))
+    };
+    let mut fit = 1.0;
+    let (mut rows, mut row_ranges, mut row_lines, mut row_soft, mut row_gap) = wrap_styled_rows(&chars, &room, &breaks, fit, &measure)?;
+    // A Thai edit that would need more lines than its paragraph of several had is condensed (down
+    // to MIN_FIT) to keep its line count: a new line would land on the text below.
+    if thai && style.width.is_none() && style.scale.is_none() && block.rows.len() > 1 && rows.len() > block.rows.len() {
+        let mut f = 0.99;
+        while f >= MIN_FIT - 1e-9 {
+            let condensed = wrap_styled_rows(&chars, &room, &breaks, f, &measure)?;
+            if condensed.0.len() <= block.rows.len().max(1) {
+                fit = f;
+                (rows, row_ranges, row_lines, row_soft, row_gap) = condensed;
+                break;
+            }
+            f -= 0.01;
+        }
+    }
     let streams = content_streams(doc, &p.dict)?;
     let pieces = Pieces::join(&streams.iter().map(|(_, d)| d.as_slice()).collect::<Vec<_>>());
     let ops = pieces.parse().ops;
     // A row the edit doesn't reach keeps its source operators, so its kerning, TJ word gaps and
     // glyph widths stay exactly as they were instead of being rebuilt from the text state. A row
     // aligned on its own is reached; the rows around it are not.
-    let plain = BlockStyle { ranges: Vec::new(), aligns: Vec::new(), ..style.clone() } == BlockStyle::default();
+    // Not when the whole paragraph is set in Sarabun (one family, ADR 0002) or condensed to fit.
+    let plain = BlockStyle { ranges: Vec::new(), aligns: Vec::new(), ..style.clone() } == BlockStyle::default() && sarabun.is_none() && fit == 1.0;
     let mut kept = if plain {
         untouched_rows(block, draft, &row_ranges)
             .into_iter()
@@ -977,7 +1135,12 @@ pub(crate) fn rewrite_styled_block(
     // What is in force where the rewrite is drawn, and what the text after it expects.
     let after = if split { &o.state } else { &o.bt_state };
     validate_contextual_rows(&rows, &kept)?;
-    let measured: Vec<_> = rows.iter().map(|row| measure(row)).collect::<Result<_, _>>()?;
+    if thai && rows.len() > block.rows.len() {
+        notice.get_or_insert_with(|| {
+            "The edited text is longer than its line, so it wraps onto a new line; check that it doesn't overlap the text below".into()
+        });
+    }
+    let measured: Vec<_> = rows.iter().map(|row| measure(row).map(|w| w * fit)).collect::<Result<_, _>>()?;
     let shaped = prepare_shaped_rows(doc, &fonts, &rows, &kept, advance)?;
     let ShapedRows { runs: shaped_runs, advances: segment_advances } = shaped;
     let glyph_resources = embed_shaped_resources(doc, &mut fonts, &shaped_runs)?;
@@ -1060,6 +1223,7 @@ pub(crate) fn rewrite_styled_block(
             if !shaped_runs.contains_key(&(row_index, pos)) {
                 state.scale *= calibration.get(&item.1).copied().unwrap_or(1.0);
             }
+            state.scale *= fit;
             if let Some([r, g, b]) = overrides.get(&item.1).and_then(|r| r.color).or(style.color) {
                 state.fill = vec![Op::new("rg", vec![n(r), n(g), n(b)])];
             }
@@ -1190,5 +1354,5 @@ pub(crate) fn rewrite_styled_block(
         d.set(b"Contents".to_vec(), contents);
         d.set(b"Resources".to_vec(), Object::Dict(res));
     })?;
-    Ok(LineEdit { substituted })
+    Ok(LineEdit { substituted, notice })
 }

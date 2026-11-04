@@ -15,6 +15,9 @@ use super::{
 pub struct LineEdit {
     /// `Some(font)` when the line's font couldn't show the new text and Helvetica was used.
     pub substituted: Option<String>,
+    /// Why the edit looks different from the text around it, for the interface to show (e.g. the
+    /// paragraph was set in Sarabun because its font isn't installed).
+    pub notice: Option<String>,
 }
 
 /// Replace the text of line `line` (an index into [`text_lines`]) on `page` with `text`.
@@ -138,7 +141,7 @@ pub(crate) fn replace_line_with_limit(doc: &mut Document, page: usize, line: usi
             d.set(b"Resources".to_vec(), Object::Dict(res));
         }
     })?;
-    Ok(LineEdit { substituted })
+    Ok(LineEdit { substituted, notice: None })
 }
 
 /// The size of the last `Tf` before operator `at`.
@@ -957,7 +960,7 @@ pub(crate) fn rewrite_block_from(
             d.set(b"Resources".to_vec(), Object::Dict(res));
         }
     })?;
-    Ok(LineEdit { substituted: font.substituted })
+    Ok(LineEdit { substituted: font.substituted, notice: None })
 }
 
 /// The cover (when [`BlockStyle::cover`] asks for one) and visible rendering that start a
