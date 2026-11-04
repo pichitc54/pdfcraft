@@ -281,6 +281,7 @@ fn format_section(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens) {
             Some(&mut ed.extras),
             Fonts { sources: Some(&sources), shown, mixed_size },
             Some(paragraphs),
+            None,
         );
         if out.size_committed {
             ed.choose_size(ed.look.size);
@@ -307,7 +308,8 @@ fn format_section(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens) {
             Some(FontChoice::Installed(path)) => app.use_paths(crate::files::FilePurpose::TextFont { page: ed.page }, &[path]),
             #[cfg(target_arch = "wasm32")]
             Some(FontChoice::Installed(_)) => {}
-            None => {}
+            // Only rich text fields offer families by name.
+            Some(FontChoice::Named(_)) | None => {}
         }
         if changed {
             app.apply_line_format(i, ed, Some(ui.ctx()));
@@ -394,7 +396,7 @@ fn added_text_format(
     paragraphs: Option<crate::format_text_ui::Paragraphs>,
 ) -> crate::format_text_ui::Outcome {
     let shown = style.family.label().to_string();
-    let out = crate::format_text_ui::panel(ui, t, style, None, crate::format_text_ui::Fonts { sources: None, shown, mixed_size: false }, paragraphs);
+    let out = crate::format_text_ui::panel(ui, t, style, None, crate::format_text_ui::Fonts { sources: None, shown, mixed_size: false }, paragraphs, None);
     if let Some(crate::format_text_ui::FontChoice::Family(family)) = out.font {
         style.family = family;
     }

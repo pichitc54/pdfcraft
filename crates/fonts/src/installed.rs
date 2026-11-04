@@ -58,6 +58,21 @@ impl FontIndex {
         Self { faces }
     }
 
+    /// The families with a Regular face that may be embedded (a single font file, its fsType
+    /// allowing installable or editable embedding), sorted: what a font list may offer.
+    pub fn embeddable_families(&self) -> Vec<String> {
+        let mut out: Vec<String> = self
+            .faces
+            .iter()
+            .filter(|(_, style, _, index)| *style == Style::Regular && *index == 0)
+            .filter(|(_, _, path, _)| crate::thai::read_font(path).is_some_and(|b| !b.starts_with(b"ttcf") && may_embed(&b)))
+            .map(|(name, _, _, _)| name.clone())
+            .collect();
+        out.sort();
+        out.dedup();
+        out
+    }
+
     /// The full face for the PDF font `pdf_name` (e.g. `ABCDEF+BrowalliaNew-Bold`) that may be
     /// embedded and covers `text`.
     pub fn find(&self, pdf_name: &str, text: &str) -> Result<FullFace, Missing> {
