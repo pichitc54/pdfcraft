@@ -2,7 +2,7 @@
 
 What this personal fork adds to PdfCraft so Thai can be filled into forms, typed into comments and edited in existing PDFs on macOS, written so it can be rebuilt on any upstream release (ADR 0003). Terms in **bold** are defined in `GLOSSARY.md`.
 
-Status: written 2026-10-28 for the rebuild on v0.14.0, from the v0.9.0 fork (tag `thai-forms-v0.9`). Areas A–E built on v0.14.0 (branch `thai`); area E from issue pichitc54/pdfcraft#1. Area F from issue pichitc54/pdfcraft#2. Rebuilt on v0.16.1 (branch `thai`, previous build kept as tag `thai-v0.14`).
+Status: written 2026-10-28 for the rebuild on v0.14.0, from the v0.9.0 fork (commit b9b3ccd; its tag `thai-forms-v0.9` was deleted on 2026-10-31). Areas A–E built on v0.14.0 (branch `thai`); area E from issue pichitc54/pdfcraft#1. Area F from issue pichitc54/pdfcraft#2. Rebuilt on v0.16.1 (branch `thai`, previous build kept as tag `thai-v0.14`).
 
 ## Principles
 
