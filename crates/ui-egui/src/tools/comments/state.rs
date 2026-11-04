@@ -353,8 +353,18 @@ impl PageCx<'_> {
 
     /// Where a comment is on screen: one rectangle, or one per marked line for text markup.
     pub(crate) fn screen_rects<'b>(&'b self, a: &'b Annotation) -> impl Iterator<Item = Rect> + 'b {
-        let quads = if is_markup(&a.subtype) { a.quads.as_slice() } else { &[] };
-        let fallback = quads.is_empty().then(|| self.screen_rect(a));
+        let markup = is_markup(&a.subtype);
+        let quads = if markup { a.quads.as_slice() } else { &[] };
+        // Text markup without quads is found by its `/Rect`, unless that covers the whole page:
+        // then it marks nothing in particular (an Acrobat leftover underline with a ±32768
+        // `/Rect`, docs/thai-forms-spec.md area H).
+        let covers_page = || {
+            self.info.pages.get(self.page).is_some_and(|p| {
+                let (r, c) = (a.rect, p.crop);
+                r[0] <= c[0] && r[1] <= c[1] && r[2] >= c[2] && r[3] >= c[3]
+            })
+        };
+        let fallback = (quads.is_empty() && !(markup && covers_page())).then(|| self.screen_rect(a));
         quads
             .iter()
             .map(|q| {

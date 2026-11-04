@@ -499,3 +499,52 @@ fn text_boxes_fit_their_text() {
     assert_eq!(long[2], 300.0);
     assert!(long[3] - long[1] > 50.0);
 }
+
+/// A text-markup comment without quads whose `/Rect` covers the whole page (an Acrobat leftover
+/// underline, carried from receipt to receipt) marks nothing: hovering or clicking anywhere on
+/// the page doesn't find it, while one with quads is still found on them. (One without quads and
+/// an ordinary `/Rect` keeps upstream's fallback: `tests/it/comments.rs`.)
+#[test]
+fn a_markup_comment_without_quads_is_not_under_the_pointer() {
+    let underline = |quads: Vec<[f32; 8]>| Annotation {
+        page: 0,
+        subtype: "Underline".into(),
+        author: Some("pichitc".into()),
+        contents: None,
+        modified: None,
+        name: None,
+        in_reply_to: None,
+        parent: None,
+        grouped: false,
+        rect: [-32768.0, -32768.0, 32768.0, 32768.0],
+        color: None,
+        index: 0,
+        state: None,
+        quads,
+        locked: false,
+        intent: None,
+        fill_sign: false,
+        no_rotate: false,
+        points: Vec::new(),
+    };
+    let page = PageInfo { width: 200.0, height: 200.0, label: String::new(), crop: [0.0, 0.0, 200.0, 200.0], rotation: 0 };
+    let xf = PageXform { rect: Rect::from_min_size(Pos2::ZERO, vec2(200.0, 200.0)), rot: 0, pw: 200.0, ph: 200.0 };
+    let prefs = CommentPrefs::default();
+    let word = [10.0, 100.0, 60.0, 100.0, 10.0, 110.0, 60.0, 110.0];
+    for (quads, on_word, elsewhere) in [(Vec::new(), false, false), (vec![word], true, false)] {
+        let info = DocInfo { pages: vec![page.clone()], annotations: vec![underline(quads)], ..Default::default() };
+        let cx = PageCx {
+            page: 0,
+            xf: &xf,
+            ptr: &PagePointer::default(),
+            info: &info,
+            tool: QuickTool::Select,
+            prefs: &prefs,
+            allowed: true,
+            hidden: false,
+            redact_mark: ([0.0; 3], 1.0),
+        };
+        let at = |x: f32, y: f32| cx.hit(xf.user_rect(&info, 0, [x, y, x, y]).center()).is_some();
+        assert_eq!((at(30.0, 105.0), at(150.0, 30.0)), (on_word, elsewhere), "{} quads", info.annotations[0].quads.len());
+    }
+}
