@@ -2274,3 +2274,6 @@ fn indirect_typewriter_names_keep_outer_whitespace_in_summaries() {
     check(&doc);
     check(&reopen(&doc));
 }
+
+#[path = "thai_tests.rs"]
+mod thai;
