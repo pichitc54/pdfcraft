@@ -273,7 +273,7 @@ fn thai_inside_a_latin_family_goes_to_sarabun_and_the_latin_stays() {
 #[test]
 fn a_thai_first_line_of_a_rich_value_keeps_its_stacked_marks_inside() {
     let Some(faces) = sarabun("a_thai_first_line_of_a_rich_value_keeps_its_stacked_marks_inside") else { return };
-    let top = pdfcraft_fonts::thai::mark_top(faces.for_style(true, false)).unwrap();
+    let top = pdfcraft_fonts::thai::text_top(faces.for_style(true, false), "ห้าหมื่นบาทถ้วน").unwrap();
     let mut doc = one_page();
     let rect = [51.3, 166.6, 401.8, 194.0];
     let name = rich_field(&mut doc, rect, true, 12.0);
@@ -282,4 +282,54 @@ fn a_thai_first_line_of_a_rich_value_keeps_its_stacked_marks_inside() {
     let at = placements(&ap(&doc, &field_named(&doc, &name).widgets[0]));
     let (_, y, size) = at[0];
     assert!(y + top * size <= rect[3] - rect[1] + 1e-6, "marks reach {} in a {} box", y + top * size, rect[3] - rect[1]);
+}
+
+/// The distinct baselines of `name`'s first widget, top to bottom.
+fn baselines_of(doc: &Document, name: &str) -> Vec<f64> {
+    placements(&ap(doc, &field_named(doc, name).widgets[0])).iter().map(|(_, y, _)| *y).fold(Vec::new(), |mut v, y| {
+        if v.last() != Some(&y) {
+            v.push(y);
+        }
+        v
+    })
+}
+
+/// A table column of rich multiline fields: blank lines (empty paragraphs, which have no size of
+/// their own) are as tall as the text around them, not the field's `/DA` size, so a column with
+/// blank lines stays level with its neighbour row for row.
+#[test]
+fn blank_lines_of_a_rich_value_are_as_tall_as_the_text_around_them() {
+    let mut doc = one_page();
+    let eight = RunStyle { size: Some(8.0), ..Default::default() };
+    let rect = |x: f64| [x, 400.0, x + 100.0, 650.0];
+    let gaps = rich_field(&mut doc, rect(72.0), true, 6.0);
+    let rows = rich_field(&mut doc, rect(200.0), true, 6.0);
+    let blank = || para(Vec::new());
+    let line = |t: &str| para(vec![run(t, eight.clone())]);
+    set_value(&mut doc, &gaps, &FieldValue::Rich(RichValue { paragraphs: vec![blank(), line("1"), blank(), blank(), line("2")] })).unwrap();
+    set_value(&mut doc, &rows, &FieldValue::Rich(RichValue { paragraphs: vec![line("a"), line("b"), line("c"), line("d"), line("e")] })).unwrap();
+    let doc = reopen(&doc);
+    let (g, r) = (baselines_of(&doc, &gaps), baselines_of(&doc, &rows));
+    assert_eq!(g.len(), 2, "{g:?}");
+    assert!((g[0] - r[1]).abs() < 0.01 && (g[1] - r[4]).abs() < 0.01, "rows 2 and 5 line up: {g:?} {r:?}");
+}
+
+/// A Thai first line drops below 0.85 em only as far as its own stacked marks need: one without
+/// marks above it (ระบบ) stays level with a Latin neighbour.
+#[test]
+fn a_thai_first_line_without_tall_marks_stays_level_with_its_neighbours() {
+    if sarabun("a_thai_first_line_without_tall_marks_stays_level_with_its_neighbours").is_none() {
+        return;
+    }
+    let mut doc = one_page();
+    let eight = RunStyle { size: Some(8.0), ..Default::default() };
+    let rect = |x: f64| [x, 400.0, x + 150.0, 650.0];
+    let thai = rich_field(&mut doc, rect(72.0), true, 6.0);
+    let latin = rich_field(&mut doc, rect(250.0), true, 6.0);
+    let line = |t: &str| para(vec![run(t, eight.clone())]);
+    set_value(&mut doc, &thai, &FieldValue::Rich(RichValue { paragraphs: vec![line("Project - ระบบ Intercom"), line("ระบบ")] })).unwrap();
+    set_value(&mut doc, &latin, &FieldValue::Rich(RichValue { paragraphs: vec![line("A"), line("1")] })).unwrap();
+    let doc = reopen(&doc);
+    let (t, l) = (baselines_of(&doc, &thai), baselines_of(&doc, &latin));
+    assert!((t[0] - l[0]).abs() < 0.01, "first rows line up: {t:?} {l:?}");
 }

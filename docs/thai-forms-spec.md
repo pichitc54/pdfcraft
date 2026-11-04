@@ -41,7 +41,7 @@ Status: written 2026-10-28 for the rebuild on v0.14.0, from the v0.9.0 fork (com
 - **Style follows the field font**: bold → Sarabun Bold, italic → Italic, bold italic → Bold Italic, and Regular when the style is missing.
 - **Visual size.** When a field switches to Sarabun, its size is scaled so Sarabun's x-height matches the x-height the field font declares (FontDescriptor `/XHeight`). The scale is clamped to 0.5–1.5 and rounded to 0.1 pt, and `/DA` records the new size. A font with no declared x-height (standard Helvetica) keeps its size.
 - **Line pitch.** In every multiline field, Thai or not, the first baseline is 0.85 em below the top of the text area and the **line pitch** is 1.15 em, so a table made of fields side by side lines up row for row.
-- **Stacked marks.** A Thai first line sits at whichever is lower: 0.85 em, or just low enough for the face's tallest shaped stack (ื่, about 1.12 em in Sarabun) to stay inside the box. The pitch stays 1.15 em.
+- **Stacked marks.** A Thai first line sits at whichever is lower: 0.85 em, or just low enough for that line's own tallest shaped stack (ื่ in หมื่น reaches about 1.12 em in Sarabun) to stay inside the box. A first line without tall stacks (ระบบ) stays at 0.85 em, level with the fields beside it. The pitch stays 1.15 em.
 - **Wrapping.** Multiline Thai wraps at dictionary word boundaries.
 - **Auto size.** A field with size 0 Tf is sized with the Thai pen's widths, word breaks and line pitch. New fields default to Auto size (upstream).
 - **Comb and MaxLen.** A **comb cell** holds one grapheme cluster, and `/MaxLen` counts clusters, both in the appearance and in the fill editor.
@@ -57,6 +57,7 @@ Status: written 2026-10-28 for the rebuild on v0.14.0, from the v0.9.0 fork (com
 - A BrowalliaUPC 12 field filled with Thai comes out as Sarabun 8.1 and doesn't overflow.
 - A Helvetica Bold field filled with Thai uses Sarabun Bold.
 - "หมื่น" in the first line of a multiline field at the largest Auto size: no mark is clipped.
+- A multiline Thai field whose first line is "ระบบ Intercom" starts on the same baseline as a Latin field beside it.
 - A row of multiline fields (code, description, quantity, price, amount at 8 pt), with Thai in the description: the baselines of rows 2 and later line up across the fields.
 - A comb field with MaxLen 2: "ที่นี่" fills both cells (ที่ | นี่), and typing a third cluster is refused.
 - With no Thai face available, saving keeps `/V` and shows the warning.
@@ -138,7 +139,7 @@ Full user stories, decisions and test seams: issue pichitc54/pdfcraft#1. Upstrea
 - **Controls**: upstream's Format text panel opens with a rich-text field's fill editor (a strikethrough toggle added; line/paragraph spacing and lists disabled), plus ⌘B / ⌘I / ⌘U. The editor shows the formatting; typing continues the style before the caret; paste is plain.
 - **Font list**: Helvetica, Times, Courier, Sarabun, and installed fonts whose fsType allows embedding (ADR 0002), embedded whole in `/DR`. No "Load font…".
 - **Thai**: Thai characters in a run whose family can't draw them are drawn in Sarabun in that run's style. Runs without a family follow area A (the whole value in Sarabun when the field font can't draw it).
-- **Sizes**: runs given a size keep it; in an Auto size field the rest fit together. A line is 1.15 × its largest size high; the first line follows area A's stacked-mark rule.
+- **Sizes**: runs given a size keep it; in an Auto size field the rest fit together. A line is 1.15 × its largest size high; a blank line (an empty paragraph, which has no size of its own) is as tall as the line before it, or the one after it when it comes first, on the page and in the fill editor. The first line follows area A's stacked-mark rule.
 
 ### Acceptance examples
 
@@ -147,6 +148,7 @@ Full user stories, decisions and test seams: issue pichitc54/pdfcraft#1. Upstrea
 - A Latin word set in Times inside a Thai value: the Latin in Times, the Thai beside it in Sarabun.
 - A malformed `/RV` opens showing the plain `/V`, without a crash.
 - ⌘B on a selection in an ordinary (not rich-text) field does nothing.
+- A table of rich-text columns set to 8 pt, where some columns start with or contain blank lines: every row lines up across the columns.
 - With words selected in a rich-text field, typing 9 into the Format text panel's size box and pressing Enter sizes those words 9 pt (the box takes the keyboard, and the field's selection is kept for it). The list names the field's own font (Sarabun, Angsana New) for text without a family of its own.
 
 Test seams: the engine's set-field-value edit / form-fill tool (what lands in the PDF) and the UI harness (editor and panel behaviour).

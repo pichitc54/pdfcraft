@@ -445,8 +445,20 @@ pub(super) fn draw(doc: &Document, f: &Field, wd: &Dict, place: Placement, da: &
             .next()
             .cloned()
     };
-    let pitch = |l: &Line, base: f64| -> f64 {
-        let s = max_size(l, base);
+    // Each line's size: a blank line (an empty paragraph, which has no size of its own) is as
+    // big as the line before it, or the one after it when it comes first, so blank rows keep the
+    // pitch of the text around them.
+    let sizes = |lines: &[Line], base: f64| -> Vec<f64> {
+        let own: Vec<Option<f64>> = lines.iter().map(|l| (!l.frags.is_empty()).then(|| max_size(l, base))).collect();
+        (0..own.len())
+            .map(|i| {
+                let before = own.get(..i).and_then(|o| o.iter().rev().flatten().next().copied());
+                let after = || own.get(i..).and_then(|o| o.iter().flatten().next().copied());
+                own.get(i).copied().flatten().or(before).or_else(after).unwrap_or(base)
+            })
+            .collect()
+    };
+    let pitch = |l: &Line, s: f64| -> f64 {
         match rv.paragraphs.get(l.para).and_then(|p| p.line_height) {
             Some(LineHeight::Points(v)) => v,
             Some(LineHeight::Factor(v)) => s * v,
@@ -457,24 +469,26 @@ pub(super) fn draw(doc: &Document, f: &Field, wd: &Dict, place: Placement, da: &
     let baselines = |lines: &[Line], base: f64| -> (Vec<f64>, usize) {
         let mut ys = Vec::new();
         let mut y = height - pad;
+        let sized = sizes(lines, base);
         for (i, l) in lines.iter().enumerate() {
-            let s = max_size(l, base);
+            let s = sized.get(i).copied().unwrap_or(base);
             let para = rv.paragraphs.get(l.para);
             if l.first_in_para && i > 0 {
                 y -= para.and_then(|p| p.space_before).unwrap_or(0.0).clamp(0.0, 1000.0);
             }
             if i == 0 {
-                let room = has_face(l).and_then(|face| thai::mark_top(&face)).map_or(0.0, |top| top * s - pad);
+                let text: String = l.frags.iter().map(|(_, f)| f.text.as_str()).collect();
+                let room = has_face(l).and_then(|face| thai::text_top(&face, &text)).map_or(0.0, |top| top * s - pad);
                 y -= (s * 0.85).max(room);
             } else {
-                y -= pitch(l, base);
+                y -= pitch(l, s);
             }
             ys.push(y);
             if l.last_in_para {
                 y -= para.and_then(|p| p.space_after).unwrap_or(0.0).clamp(0.0, 1000.0);
             }
         }
-        let room = lines.iter().zip(&ys).filter(|(l, y)| **y - 0.207 * max_size(l, base) >= bw - 0.01).count();
+        let room = sized.iter().zip(&ys).filter(|(s, y)| **y - 0.207 * **s >= bw - 0.01).count();
         (ys, room)
     };
     let fits = |base: f64| -> bool {
