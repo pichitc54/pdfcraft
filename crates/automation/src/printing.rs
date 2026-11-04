@@ -206,7 +206,9 @@ impl Automation {
         } else {
             None
         };
-        let settings = print::Settings { pages, paper, orientation, layout, content, raster, crops: Vec::new() };
+        // Only a spooled job needs the mixed sheets turned in the PDF (see `Settings::turn_mixed`).
+        let turn_mixed = !cfg!(windows) && a.opt_str("printer")?.is_some();
+        let settings = print::Settings { pages, paper, orientation, layout, content, raster, crops: Vec::new(), turn_mixed };
         let sizes: Vec<(f64, f64)> = self.doc(a)?.info.pages.iter().map(|p| (p.width as f64, p.height as f64)).collect();
         let laid_out = print::layout(&sizes, &settings).map_err(|e| bad(e.to_string()))?;
         let sheets = laid_out.len();
@@ -274,6 +276,21 @@ mod tests {
         assert_eq!(job(json!({}), &sheets(&[(792.0, 612.0), (612.0, 792.0)])), vec![media.clone()], "a job that mixes them");
         let chosen = ("orientation-requested".to_string(), "5".to_string());
         assert_eq!(job(json!({ "options": { "orientation-requested": "5" } }), &landscape), [chosen, media], "the caller's own choice, once");
+    }
+
+    /// A mixed job to a CUPS queue is laid out on portrait sheets with its landscape pages turned,
+    /// so the sheets handed to `spool_job` ask for no orientation, which would turn the portrait
+    /// ones wrongly. Saved to a file, the same pages keep their landscape sheet.
+    #[test]
+    fn a_mixed_job_to_a_printer_asks_for_no_orientation() {
+        let sizes = [(595.0, 842.0), (842.0, 595.0)];
+        let settings = |turn_mixed| print::Settings { pages: vec![0, 1], turn_mixed, ..Default::default() };
+        let spooled = print::layout(&sizes, &settings(true)).unwrap();
+        assert!(spooled.iter().all(|s| s.size.0 < s.size.1), "{:?}", spooled.iter().map(|s| s.size).collect::<Vec<_>>());
+        let options = spool_job(&Args(&json!({})), "Office", "a.pdf".into(), None, 0, &spooled).unwrap().options;
+        assert_eq!(options, [("media".to_string(), "Letter".to_string())]);
+        let saved = print::layout(&sizes, &settings(false)).unwrap();
+        assert!(saved[1].size.0 > saved[1].size.1);
     }
 
     /// #3752: `doc_print` to a printer sent no paper, so the queue's default paper stood in for

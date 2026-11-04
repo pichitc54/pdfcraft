@@ -142,6 +142,11 @@ pub struct Settings {
     /// resolution before it is placed on the paper. The engine does the rendering; `impose` is
     /// then given the image-only document.
     pub raster: Option<Raster>,
+    /// The sheets go to a spooler that turns only a whole job (CUPS): in a job that mixes portrait
+    /// and landscape pages, Auto orientation keeps every sheet portrait and turns each landscape
+    /// page a quarter onto it, as `orientation-requested` can't turn some sheets and not others.
+    /// Off for Save as PDF and Windows, whose print ticket turns each sheet itself.
+    pub turn_mixed: bool,
 }
 
 /// How pages are rendered when printing as image.
@@ -175,6 +180,7 @@ impl Default for Settings {
             content: Content::default(),
             raster: None,
             crops: Vec::new(),
+            turn_mixed: false,
         }
     }
 }

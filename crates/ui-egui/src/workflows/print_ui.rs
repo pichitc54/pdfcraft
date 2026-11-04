@@ -399,13 +399,16 @@ impl PdfCraftApp {
         let Some((_, id)) = self.active_ids() else { return false };
         let Some(doc) = self.session.get(id) else { return false };
         let labels: Vec<String> = doc.info.pages.iter().map(|p| p.label.clone()).collect();
-        let settings = match self.print_draft.settings(doc.info.pages.len(), &labels) {
+        let mut settings = match self.print_draft.settings(doc.info.pages.len(), &labels) {
             Ok(s) => s,
             Err(e) => {
                 self.notify_tr(&e);
                 return false;
             }
         };
+        // Only a CUPS queue needs the sheets turned in the PDF: Save as PDF keeps them as laid
+        // out, the browser prints them itself, and Windows' print ticket turns each sheet.
+        settings.turn_mixed = !cfg!(windows) && self.print_draft.printer.as_deref().is_some_and(|p| p != crate::web_print::BROWSER_PRINTER);
         let name = doc.name.clone();
         let bytes = match self.session.print_pdf(id, &settings) {
             Ok(b) => b,

@@ -293,6 +293,70 @@ fn printing_landscape_sheets_tells_cups_to_turn_them() {
     assert_eq!(orientation(&job), ["5"], "{:?}", job.options);
 }
 
+/// A CUPS job can only turn the whole job, so a document that mixes portrait and landscape pages
+/// is spooled with every sheet portrait and the landscape pages turned onto them, and carries no
+/// orientation option that would turn the portrait ones wrongly.
+#[test]
+fn a_mixed_job_prints_its_landscape_pages_turned() {
+    use pdfcraft_engine::print::spool;
+    use std::sync::{Arc, Mutex};
+    let mut bytes = b"%PDF-1.7\n".to_vec();
+    let objects = [
+        "<< /Type /Catalog /Pages 2 0 R >>".to_owned(),
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_owned(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << >> /Contents 5 0 R >>".to_owned(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 842 595] /Resources << >> /Contents 5 0 R >>".to_owned(),
+        "<< /Length 27 >>\nstream\n0 0 1 rg 20 20 200 100 re f\nendstream".to_owned(),
+    ];
+    let mut offsets = Vec::new();
+    for (i, object) in objects.iter().enumerate() {
+        offsets.push(bytes.len());
+        bytes.extend_from_slice(format!("{} 0 obj\n{object}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = bytes.len();
+    bytes.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes());
+    for offset in offsets {
+        bytes.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+    }
+    bytes.extend_from_slice(format!("trailer << /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objects.len() + 1).as_bytes());
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("mixed.pdf", None, bytes.clone()).unwrap();
+        app
+    });
+    h.run_steps(4);
+    type Spooled = Vec<(Vec<u8>, spool::Job)>;
+    let spooled: Arc<Mutex<Spooled>> = Arc::default();
+    let sent = Arc::clone(&spooled);
+    h.state_mut().spooler = Some(Arc::new(move |pdf: &[u8], job: &spool::Job| {
+        sent.lock().unwrap().push((pdf.to_vec(), job.clone()));
+        Ok(String::new())
+    }));
+    assert!(h.state_mut().execute("print.dialog"));
+    h.run_steps(3);
+    h.state_mut().print_draft.printer = Some("Test_Queue".into());
+    h.run_steps(12);
+    h.get_by(|n| n.label().as_deref() == Some("Print") && n.role() == Role::Button).click();
+    for _ in 0..400 {
+        h.run_steps(1);
+        if !spooled.lock().unwrap().is_empty() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let (pdf, job) = spooled.lock().unwrap().last().cloned().expect("the job reached the spooler");
+    let turned = job.options.iter().any(|(k, _)| k == "orientation-requested");
+    let printed = pdfcraft_cos::Document::open(Arc::new(pdf)).unwrap();
+    let sheets: Vec<(f64, f64)> = pdfcraft_model::pages(&printed).iter().map(|p| p.display_size(&printed)).collect();
+    if cfg!(windows) {
+        assert!(sheets[1].0 > sheets[1].1, "Windows' print ticket turns each sheet itself: {sheets:?}");
+    } else {
+        assert!(!turned, "{:?}", job.options);
+        assert!(sheets.len() == 2 && sheets.iter().all(|s| s.0 < s.1), "every sheet is portrait: {sheets:?}");
+    }
+}
+
 /// Properties… shows the printer driver's own options (CUPS) and sends only those changed.
 #[test]
 fn print_dialog_shows_the_printer_driver_options() {
