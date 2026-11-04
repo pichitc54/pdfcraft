@@ -106,6 +106,15 @@ fn button_export_options(f: &Field, index: usize, value: &str) -> Result<Vec<Obj
     Ok(out)
 }
 
+/// Rewrite the annotation flags (`/F`) of `widgets` with `change`.
+fn set_widget_flags(doc: &mut Document, widgets: &[crate::Widget], change: impl Fn(i64) -> i64) -> Result<(), FormError> {
+    for w in widgets {
+        let flags = doc.get(w.obj).as_dict().and_then(|d| d.get(b"F").and_then(|v| doc.resolve(v).as_int())).unwrap_or(0);
+        doc.update_dict(w.obj, |d| d.set(b"F".to_vec(), Object::Int(change(flags))))?;
+    }
+    Ok(())
+}
+
 /// Change a field's properties (General and Options tabs) and redraw it.
 pub fn set_props(doc: &mut Document, name: &str, props: &FieldProps) -> Result<String, FormError> {
     if props.font_size.is_some_and(|size| !size.is_finite() || size < 0.0) {
@@ -166,14 +175,13 @@ pub fn set_props(doc: &mut Document, name: &str, props: &FieldProps) -> Result<S
         return Ok(name.to_string());
     }
     if let Some(lock) = props.locked {
-        for w in &f.widgets {
-            let flags = doc.get(w.obj).as_dict().and_then(|d| d.get(b"F").and_then(|v| doc.resolve(v).as_int())).unwrap_or(0);
-            let v = if lock { flags | 128 } else { flags & !128 };
-            doc.update_dict(w.obj, |d| d.set(b"F".to_vec(), Object::Int(v)))?;
-        }
+        set_widget_flags(doc, &f.widgets, |flags| if lock { flags | 128 } else { flags & !128 })?;
         if *props == (FieldProps { locked: props.locked, ..FieldProps::default() }) {
             return Ok(name.to_string());
         }
+    }
+    if let Some(visibility) = props.visibility {
+        set_widget_flags(doc, &f.widgets, |flags| visibility.applied(flags))?;
     }
     if let Some(acts) = &props.actions {
         crate::set_field_actions(doc, name, acts)?;

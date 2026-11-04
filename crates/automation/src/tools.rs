@@ -493,6 +493,7 @@ pub fn tools() -> Vec<ToolDef> {
                 "options": { "type": "array", "items": { "type": "string" } },
                 "align": { "type": "string", "enum": ["left", "center", "right"] },
                 "locked": { "type": "boolean", "description": "Lock the field's properties (only unlocking is accepted while locked)." },
+                "visibility": { "type": "string", "enum": ["visible", "hidden", "visible_no_print", "hidden_printable"], "description": "Where every widget of the field shows (Acrobat's Form field): on screen and paper, neither, on screen only (a Clear Data button), or on paper only." },
                 "default": { "type": "string" },
                 "check_style": { "type": "string", "enum": ["check", "circle", "cross", "diamond", "square", "star"], "description": "Check boxes and radio buttons: the mark shown when on." },
                 "flags": { "type": "object", "additionalProperties": { "type": "boolean" } },

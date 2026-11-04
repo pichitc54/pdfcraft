@@ -65,6 +65,27 @@ pub(crate) fn body(ui: &mut egui::Ui, d: &mut FieldDraft, t: &crate::theme::Toke
                     let l = ui.label(tl!("Tooltip:"));
                     ui.add(crate::widgets::line(&mut d.tooltip).desired_width(340.0)).labelled_by(l.id);
                     ui.end_row();
+                    // Acrobat's Form field list: a Clear Data or Print button is usually on screen only.
+                    use pdfcraft_engine::FieldVisibility as V;
+                    let choices = [
+                        (V::Visible, tl!("Visible")),
+                        (V::Hidden, tl!("Hidden")),
+                        (V::VisibleNoPrint, tl!("Visible but doesn't print")),
+                        (V::HiddenPrintable, tl!("Hidden but printable")),
+                    ];
+                    let l = ui.label(tl!("Form field:"));
+                    let shown = choices.iter().find(|(v, _)| *v == d.visibility).map_or("", |(_, label)| *label);
+                    craft_ui::ComboBox::from_id_salt("field-visibility")
+                        .selected_text(shown)
+                        .width(340.0)
+                        .show_ui(ui, |ui| {
+                            for (v, label) in choices {
+                                ui.selectable_value(&mut d.visibility, v, label);
+                            }
+                        })
+                        .response
+                        .labelled_by(l.id);
+                    ui.end_row();
                 });
                 ui.add_space(12.0);
                 widgets::section_title(ui, tl!("Common Properties"));

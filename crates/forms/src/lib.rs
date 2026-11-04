@@ -112,6 +112,50 @@ pub mod flags {
     pub const COMMIT_ON_SEL_CHANGE: u32 = 1 << 26;
 }
 
+/// Whether a widget shows on screen and on paper, as Acrobat's Field Properties ▸ General ▸
+/// Form field sets it through the annotation flags (`/F`, ISO 32000-2 Table 167): Print (bit 3),
+/// Hidden (bit 2) and NoView (bit 6).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Visibility {
+    /// On screen and on paper.
+    #[default]
+    Visible,
+    /// Neither.
+    Hidden,
+    /// On screen only, as a Clear Data or Print button usually is.
+    VisibleNoPrint,
+    /// On paper only.
+    HiddenPrintable,
+}
+
+impl Visibility {
+    const PRINT: i64 = 4;
+    const HIDDEN: i64 = 2;
+    const NO_VIEW: i64 = 32;
+
+    /// The visibility annotation flags `flags` describe.
+    pub fn of(flags: i64) -> Self {
+        match (flags & Self::HIDDEN != 0, flags & Self::NO_VIEW != 0, flags & Self::PRINT != 0) {
+            (true, _, _) => Visibility::Hidden,
+            (false, true, true) => Visibility::HiddenPrintable,
+            (false, true, false) => Visibility::Hidden,
+            (false, false, true) => Visibility::Visible,
+            (false, false, false) => Visibility::VisibleNoPrint,
+        }
+    }
+
+    /// `flags` with their Print, Hidden and NoView bits set for this visibility; the rest kept.
+    pub fn applied(self, flags: i64) -> i64 {
+        let rest = flags & !(Self::PRINT | Self::HIDDEN | Self::NO_VIEW);
+        rest | match self {
+            Visibility::Visible => Self::PRINT,
+            Visibility::Hidden => Self::HIDDEN,
+            Visibility::VisibleNoPrint => 0,
+            Visibility::HiddenPrintable => Self::NO_VIEW | Self::PRINT,
+        }
+    }
+}
+
 /// One widget (the field's appearance on a page).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Widget {
@@ -131,6 +175,8 @@ pub struct Widget {
     pub locked: bool,
     /// The widget's Hidden or NoView flag (`/F` bit 2 or 6): it isn't shown and takes no input.
     pub hidden: bool,
+    /// Whether it shows on screen and on paper (its Print, Hidden and NoView flags).
+    pub visibility: Visibility,
     /// Read-only: the field is, or the widget's own `/Ff` says so (a radio button of a group can
     /// be locked on its own, as an XFA exclusion group's layout writes it).
     pub read_only: bool,
@@ -204,6 +250,11 @@ impl Field {
     /// Locked (Field Properties ▸ General ▸ Locked): its properties can't be changed.
     pub fn locked(&self) -> bool {
         self.widgets.iter().any(|w| w.locked)
+    }
+
+    /// The visibility of the field's first widget, as Acrobat's Field Properties shows it.
+    pub fn visibility(&self) -> Visibility {
+        self.widgets.first().map_or_else(Visibility::default, |w| w.visibility)
     }
 
     /// Check boxes and radio groups with `/Opt` (PDF 1.4): one export value per widget, in widget

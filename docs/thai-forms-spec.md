@@ -12,7 +12,7 @@ Status: written 2026-10-28 for the rebuild on v0.14.0, from the v0.9.0 fork (com
    - ADR 0001: Thai field values are drawn in Sarabun, found at runtime first and embedded whole as a real TrueType font, so other viewers can redraw the field.
    - ADR 0002: Edit text may embed fonts installed on this Mac when their OS/2 `fsType` allows it.
 4. **Upstream's repo rules still apply**: never panic, quality gates, scoped builds. Its font rule (only open-licensed fonts from craft-fonts may enter a PDF) does not (ADRs 0001, 0002).
-5. **Each area ships on its own**, in the order A → B → C → D → E → F → G → H → I.
+5. **Each area ships on its own**, in the order A → B → C → D → E → F → G → H → I → J.
 
 ## Rebuild playbook
 
@@ -227,6 +227,31 @@ Not Thai-specific. On macOS, a landscape print sheet went to CUPS without an ori
 - Upstream's tests: `print` `landscape_sheets_ask_cups_to_turn_the_page`, `a_job_that_names_its_orientation_keeps_it`; `automation` `printing_landscape_sheets_to_a_printer_asks_cups_to_turn_them`; `ui-egui` `print::printing_landscape_sheets_tells_cups_to_turn_them`.
 
 Last seen in (v0.18.1): `print/src/sheets.rs` (`cups_orientation`, `add_cups_orientation`), `ui-egui/src/workflows/print_ui.rs`, `automation/src/printing.rs`.
+
+## J. Form field visibility
+
+Not Thai-specific. Acrobat's Field Properties ▸ General ▸ Form field sets whether a field shows on screen and on paper; upstream has no such setting, and every field it creates prints. The user's withholding-tax certificate has a Clear Data button that must show on screen but not print (Acrobat left it without a Print flag, which upstream's printing already honours).
+
+### Rules
+
+- Field Properties ▸ General has **Form field**: Visible, Hidden, Visible but doesn't print, Hidden but printable. It sets every widget's annotation flags (ISO 32000-2 Table 167) and keeps the others (Locked):
+
+  | Choice | Print (4) | Hidden (2) | NoView (32) |
+  |---|---|---|---|
+  | Visible | on | off | off |
+  | Hidden | off | on | off |
+  | Visible but doesn't print | off | off | off |
+  | Hidden but printable | on | off | on |
+
+- The list shows the first widget's state, read back from the same flags (a widget with no `/F` is "Visible but doesn't print").
+- `form_set_props` takes `visibility` (`visible`, `hidden`, `visible_no_print`, `hidden_printable`); `form_fields` reports it when it isn't `visible`.
+
+### Acceptance examples
+
+- A new Clear Data button prints; set to "Visible but doesn't print" it still shows on screen and is left out of the print-ready PDF.
+- The certificate's Clear Data button reads as `visible_no_print`; set to `visible`, it appears in the printout.
+
+Last seen in (v0.18.1): `forms/src/lib.rs` (`Visibility`, `of`, `applied`, `Field::visibility`, `Widget::visibility`), `forms/src/read.rs`, `forms/src/author/edit.rs` (`FieldProps::visibility`), `automation/src/forms.rs` and `tools.rs`, `ui-egui/src/tools/prepare/properties.rs` and `draft.rs`. Tests: `forms` `form_field_visibility_sets_the_print_hidden_and_noview_flags`, `engine` `field_visibility::a_button_that_does_not_print_is_left_out_of_the_printout`, `ui-egui` `prepare::form_field_visibility_takes_a_field_off_paper`.
 
 ## Out of scope
 

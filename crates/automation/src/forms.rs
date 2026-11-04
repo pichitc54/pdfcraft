@@ -2,7 +2,7 @@
 //! prepare a form (add fields one at a time or as a table, change and delete them).
 
 use pdfcraft_engine::form_scripts::{CalcOp, Calculate, Format, NOTATION_NOT_STORABLE, Validate, notation_storable};
-use pdfcraft_engine::{CalculationIssue, Edit, FieldProps, FieldValue, FormField, FormFieldKind, NewField, field_flags};
+use pdfcraft_engine::{CalculationIssue, Edit, FieldProps, FieldValue, FieldVisibility, FormField, FormFieldKind, NewField, field_flags};
 use serde_json::{Value, json};
 
 use crate::{Args, Automation, Result, ToolError, failed};
@@ -270,6 +270,9 @@ impl Automation {
                 let o = &mut more;
                 if let Some(t) = &f.tooltip {
                     o.insert("tooltip".into(), json!(t));
+                }
+                if f.visibility() != FieldVisibility::Visible {
+                    o.insert("visibility".into(), json!(visibility_name(f.visibility())));
                 }
                 if let Some(rv) = f.rich_value() {
                     o.insert("rich".into(), json!(rv.to_xhtml()));
@@ -608,6 +611,13 @@ impl Automation {
             },
             default_value: a.opt_str("default")?.map(|d| (!d.is_empty()).then(|| d.to_owned())),
             locked: a.opt_bool("locked")?,
+            visibility: match a.opt_str("visibility")? {
+                None => None,
+                Some(v) => Some(
+                    visibility_named(v)
+                        .ok_or_else(|| bad(format!("unknown visibility {v:?} (visible, hidden, visible_no_print, hidden_printable)")))?,
+                ),
+            },
             flags: match a.get("flags") {
                 None => Vec::new(),
                 Some(v) => {
@@ -822,4 +832,21 @@ impl Automation {
         out["filled_fields"] = json!(doc.form.iter().filter(|f| !f.value.is_empty()).count());
         Ok(out)
     }
+}
+
+/// The `visibility` names of `form_set_props` and `form_fields`, as Acrobat's Form field list
+/// offers them.
+const VISIBILITY_NAMES: [(FieldVisibility, &str); 4] = [
+    (FieldVisibility::Visible, "visible"),
+    (FieldVisibility::Hidden, "hidden"),
+    (FieldVisibility::VisibleNoPrint, "visible_no_print"),
+    (FieldVisibility::HiddenPrintable, "hidden_printable"),
+];
+
+fn visibility_named(name: &str) -> Option<FieldVisibility> {
+    VISIBILITY_NAMES.iter().find(|(_, n)| *n == name).map(|(v, _)| *v)
+}
+
+fn visibility_name(v: FieldVisibility) -> &'static str {
+    VISIBILITY_NAMES.iter().find(|(w, _)| *w == v).map_or("visible", |(_, n)| n)
 }

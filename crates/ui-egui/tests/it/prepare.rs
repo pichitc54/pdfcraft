@@ -1562,3 +1562,30 @@ fn button_export_properties_apply_cancel_and_undo() {
         assert_eq!(f.export_of(0), Some(original.as_str()));
     }
 }
+
+/// Field Properties ▸ General ▸ Form field: "Visible but doesn't print" keeps the field on screen
+/// and takes it off paper (its Print flag cleared), as a Clear Data button wants, and "Visible"
+/// puts it back (docs/thai-forms-spec.md area J).
+#[test]
+fn form_field_visibility_takes_a_field_off_paper() {
+    use pdfcraft_engine::FieldVisibility;
+    let mut h = harness();
+    h.state_mut().execute("form.prepare");
+    h.run_steps(2);
+    let choose = |h: &mut Harness<'static, PdfCraftApp>, v: FieldVisibility| {
+        h.state_mut().open_field_props("city", 0);
+        h.run_steps(2);
+        h.get_by_label("Form field:");
+        h.state_mut().field_props.as_mut().unwrap().visibility = v;
+        h.run_steps(2);
+        h.get_by_label("OK").click();
+        h.run_steps(3);
+        let s = h.state();
+        s.session.get(s.views[0].id).unwrap().form.iter().find(|f| f.name == "city").unwrap().clone()
+    };
+    for v in [FieldVisibility::Visible, FieldVisibility::VisibleNoPrint] {
+        let f = choose(&mut h, v);
+        assert_eq!(f.visibility(), v);
+        assert!(!f.widgets[0].hidden, "still on screen");
+    }
+}

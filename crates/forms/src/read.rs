@@ -520,6 +520,7 @@ fn walk(
                 tab: usize::MAX,
                 locked: annot_flags & 128 != 0,
                 hidden: annot_flags & (2 | 32) != 0,
+                visibility: crate::Visibility::of(annot_flags),
                 read_only: (ff | own_ff) & flags::READ_ONLY != 0,
                 rotation: appearance::mk_rotation(doc, wd),
                 caption: (kind == FieldKind::PushButton)

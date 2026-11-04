@@ -5486,6 +5486,28 @@ fn locked_button_export_edits_leave_the_document_unchanged() {
     }
 }
 
+/// Field Properties ▸ General ▸ Form field writes Acrobat's annotation flags on every widget
+/// (Print 4, Hidden 2, NoView 32) and keeps the others (Locked 128); reading them back gives the
+/// same choice.
+#[test]
+fn form_field_visibility_sets_the_print_hidden_and_noview_flags() {
+    let mut doc = one_page();
+    let name = add_field(&mut doc, 0, [40.0, 600.0, 200.0, 630.0], &NewField::Button { caption: "Clear Data".into() }, Some("clear")).unwrap();
+    let flags = |doc: &Document| {
+        let f = fields(doc).into_iter().find(|f| f.name == name).unwrap();
+        doc.get(f.widgets[0].obj).as_dict().and_then(|d| d.get(b"F").and_then(|v| v.as_int())).unwrap_or(0)
+    };
+    assert_eq!(flags(&doc), 4, "a new field prints");
+    for (v, bits) in [(Visibility::VisibleNoPrint, 0), (Visibility::Hidden, 2), (Visibility::HiddenPrintable, 36), (Visibility::Visible, 4)] {
+        set_props(&mut doc, &name, &FieldProps { visibility: Some(v), ..FieldProps::default() }).unwrap();
+        let doc = reopen(&doc);
+        assert_eq!(flags(&doc), bits, "{v:?}");
+        assert_eq!(fields(&doc).into_iter().find(|f| f.name == name).unwrap().visibility(), v);
+    }
+    assert_eq!(Visibility::VisibleNoPrint.applied(128 | 4), 128, "Locked is kept");
+    assert_eq!(Visibility::of(0), Visibility::VisibleNoPrint, "a widget without /F doesn't print (Acrobat's Clear Data button)");
+}
+
 #[path = "thai_tests.rs"]
 mod thai;
 

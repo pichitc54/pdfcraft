@@ -113,6 +113,8 @@ pub struct FieldProps {
     pub default_value: Option<Option<String>>,
     /// Lock or unlock the field (its widgets' Locked flag).
     pub locked: Option<bool>,
+    /// General ▸ Form field: show every widget on screen, on paper, both or neither.
+    pub visibility: Option<crate::Visibility>,
     /// Actions tab: every trigger's action (replacing the field's).
     pub actions: Option<Vec<(crate::Trigger, crate::FieldAction)>>,
     /// Options tab: the mark of a check box or radio button (every widget).
