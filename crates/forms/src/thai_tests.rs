@@ -221,7 +221,9 @@ fn a_thai_first_line_keeps_its_stacked_marks_inside_the_field() {
         let mut doc = one_page();
         let name = add_field(&mut doc, 0, rect, &NewField::Text { multiline: true }, None).unwrap();
         set_props(&mut doc, &name, &FieldProps { font_size: Some(size), ..FieldProps::default() }).unwrap();
-        set_value(&mut doc, &name, &FieldValue::Text("ห้าหมื่นเจ็ดพันเจ็ดร้อยแปดสิบบาทถ้วน".into())).unwrap();
+        let value = "ห้าหมื่นเจ็ดพันเจ็ดร้อยแปดสิบบาทถ้วน";
+        let top = pdfcraft_fonts::thai::text_top(&faces.regular, value).unwrap();
+        set_value(&mut doc, &name, &FieldValue::Text(value.into())).unwrap();
         let doc = reopen(&doc);
         let all = fields(&doc);
         let text = ap(&doc, &field(&all, &name).widgets[0]);
@@ -261,4 +263,30 @@ fn a_thai_value_left_to_the_viewer_is_shown_in_sarabun() {
     let original = fields(&doc);
     assert_eq!(field(&original, "amount").da, "/Helv 12 Tf 0 g");
     assert_eq!(ap(&doc, &field(&original, "amount").widgets[0]).trim_end(), "q\nQ", "the document keeps its own appearance");
+}
+
+/// A plain multiline Thai field drops its first line below 0.85 em only as far as that line's
+/// own stacked marks need, so a column of Thai without tone marks on its first line stays level
+/// with a Latin column beside it.
+#[test]
+fn a_thai_first_line_without_tall_marks_stays_at_the_shared_baseline() {
+    if sarabun("a_thai_first_line_without_tall_marks_stays_at_the_shared_baseline").is_none() {
+        return;
+    }
+    let mut doc = one_page();
+    let mut first_y = |value: &str| {
+        let name = add_field(&mut doc, 0, [72.0, 400.0, 272.0, 600.0], &NewField::Text { multiline: true }, None).unwrap();
+        set_props(&mut doc, &name, &FieldProps { font_size: Some(10.0), ..Default::default() }).unwrap();
+        set_value(&mut doc, &name, &FieldValue::Text(value.into())).unwrap();
+        let f = fields(&doc).into_iter().find(|f| f.name == name).unwrap();
+        let ops = ap(&doc, &f.widgets[0]);
+        let toks: Vec<&str> = ops.split_whitespace().collect();
+        let i = toks.iter().position(|t| *t == "Tm").unwrap();
+        toks[i - 1].parse::<f64>().unwrap()
+    };
+    let latin = first_y("Project\nA");
+    let thai = first_y("ระบบ Intercom\nA");
+    let marks = first_y("หมื่น\nA");
+    assert!((thai - latin).abs() < 0.01, "ระบบ sits at the shared baseline: {thai} vs {latin}");
+    assert!(marks < latin, "หมื่น drops for its stacked marks: {marks} vs {latin}");
 }

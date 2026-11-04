@@ -382,11 +382,11 @@ impl FontText {
 
     /// How far above the baseline the first line of a multiline field must sit, in em, at
     /// `size` with `pad` points of padding above it: 0.85 em, the same for every font so fields
-    /// side by side line up row for row, but a Thai first line sits low enough for its tallest
-    /// stacked marks (ื่) to stay inside the box, which viewers clip.
-    fn first_baseline(&self, size: f64, pad: f64) -> f64 {
+    /// side by side line up row for row, but a Thai first line (`line`) sits low enough for its
+    /// own stacked marks (ื่) to stay inside the box, which viewers clip.
+    fn first_baseline(&self, size: f64, pad: f64, line: &str) -> f64 {
         let room = match self {
-            Self::Thai(face) => thai::mark_top(face).map_or(0.0, |top| top * size - pad),
+            Self::Thai(face) => thai::text_top(face, line).map_or(0.0, |top| top * size - pad),
             _ => 0.0,
         };
         (size * 0.85).max(room)
@@ -1064,8 +1064,8 @@ fn field_appearance_fit(doc: &Document, f: &Field, w: &Widget, values: &[String]
                         |size| enc.wrap(&text, size, inner_w).len() as f64 * size * 1.15,
                     );
                 }
-                let mut y = height - pad - enc.first_baseline(size, pad);
                 let lines = enc.wrap(&text, size, inner_w);
+                let mut y = height - pad - enc.first_baseline(size, pad, lines.first().map_or("", String::as_str));
                 // The lines whose descent stays inside the border; the rest are cut off.
                 let mut room = 0;
                 for line in &lines {

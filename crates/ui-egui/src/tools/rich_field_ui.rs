@@ -252,10 +252,21 @@ pub fn job(draft: &RichDraft, text: &str, look: &FieldLook, font: f32, wrap: f32
     let mut job = LayoutJob::default();
     job.wrap.max_width = wrap;
     let scale = if look.size > 0.0 { font / look.size as f32 } else { 1.0 };
+    let chars: Vec<char> = text.chars().collect();
+    let style_at = |i: usize| draft.styles.get(i).cloned().unwrap_or_default();
+    // A blank line (a break right after another, or first) is as tall as the text nearest it,
+    // before it if any, as the page draws it, so blank rows keep the pitch of the text around them.
+    let blank_size = |i: usize| -> Option<f64> {
+        let text_size = |j: usize| (chars.get(j).is_some_and(|c| *c != '\n')).then(|| style_at(j).size.unwrap_or(look.size));
+        (0..i).rev().find_map(text_size).or_else(|| (i + 1..chars.len()).find_map(text_size))
+    };
     // Consecutive characters of one style, by byte range.
     let mut sections: Vec<(Range<usize>, RunStyle)> = Vec::new();
     for (i, (at, c)) in text.char_indices().enumerate() {
-        let style = draft.styles.get(i).cloned().unwrap_or_default();
+        let mut style = style_at(i);
+        if c == '\n' && style.size.is_none() && (i == 0 || chars.get(i - 1) == Some(&'\n')) {
+            style.size = blank_size(i);
+        }
         match sections.last_mut() {
             Some((r, s)) if *s == style => r.end = at + c.len_utf8(),
             _ => sections.push((at..at + c.len_utf8(), style)),
@@ -420,6 +431,21 @@ mod tests {
 
     fn draft(text: &str) -> RichDraft {
         RichDraft::from_rich(&RichValue::plain(text))
+    }
+
+    #[test]
+    fn a_blank_line_is_as_tall_as_the_text_around_it() {
+        let eight = RunStyle { size: Some(8.0), ..Default::default() };
+        let mut d = draft("\na\n\nb");
+        for i in [1, 4] {
+            d.styles[i] = eight.clone();
+        }
+        let look = FieldLook { size: 6.0, color: [0.0; 3], bold: false, italic: false };
+        let job = job(&d, &d.text.clone(), &look, 6.0, 100.0);
+        let size_of = |byte: usize| job.sections.iter().find(|s| s.byte_range.contains(&egui::text::ByteIndex(byte))).map(|s| s.format.font_id.size);
+        assert_eq!(size_of(0), Some(8.0), "a blank first line takes the line after it");
+        assert_eq!(size_of(3), Some(8.0), "a blank line takes the line before it");
+        assert_eq!(size_of(2), Some(6.0), "a break that ends a line of text keeps its own size");
     }
 
     #[test]

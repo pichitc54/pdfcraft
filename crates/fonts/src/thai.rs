@@ -171,10 +171,15 @@ pub fn x_height(face: &ThaiFace) -> Option<f64> {
 /// How far above the baseline Thai reaches in `face`, in em: the top of its tallest stacks (a tone
 /// mark on an upper vowel, as in หมื่น), shaped as they are drawn.
 pub fn mark_top(face: &ThaiFace) -> Option<f64> {
+    text_top(face, "หมื่นปั้นปิ๊ฟี๋ที่สึ่งกั๊ก")
+}
+
+/// How far above the baseline `text` reaches when drawn in `face`, in em, shaped as it is drawn.
+pub fn text_top(face: &ThaiFace, text: &str) -> Option<f64> {
     let font = FontRef::from_index(&face.bytes, face.index).ok()?;
     let upem = f64::from(font.metrics(Size::unscaled(), LocationRef::default()).units_per_em);
     let glyphs = font.glyph_metrics(Size::unscaled(), LocationRef::default());
-    let run = shape(face, "หมื่นปั้นปิ๊ฟี๋ที่สึ่งกั๊ก").ok()?;
+    let run = shape(face, text).ok()?;
     let top = run
         .glyphs
         .iter()
